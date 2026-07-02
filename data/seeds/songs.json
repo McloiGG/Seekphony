@@ -1,0 +1,128 @@
+[
+  {
+    "title": "Blinding Lights",
+    "artist": "The Weeknd",
+    "genre": "Synth-pop",
+    "duration_seconds": 200,
+    "source_url": "https://open.spotify.com/track/0VjIjW4GlUZAMYd2vXMi3b"
+  },
+  {
+    "title": "Shape of You",
+    "artist": "Ed Sheeran",
+    "genre": "Pop",
+    "duration_seconds": 234,
+    "source_url": "https://open.spotify.com/track/7qiZfU4dY1lWllzX7mPBI3"
+  },
+  {
+    "title": "Bad Guy",
+    "artist": "Billie Eilish",
+    "genre": "Electropop",
+    "duration_seconds": 194,
+    "source_url": "https://open.spotify.com/track/2Fxmhks0bxGSBdJ92vM42m"
+  },
+  {
+    "title": "Levitating",
+    "artist": "Dua Lipa",
+    "genre": "Disco-pop",
+    "duration_seconds": 203,
+    "source_url": "https://open.spotify.com/track/463CkQjx2Zk1yXoBuierM9"
+  },
+  {
+    "title": "Uptown Funk",
+    "artist": "Mark Ronson ft. Bruno Mars",
+    "genre": "Funk-pop",
+    "duration_seconds": 270,
+    "source_url": "https://open.spotify.com/track/32OlwWuMpZ6b0aN2RZOeMS"
+  },
+  {
+    "title": "Bohemian Rhapsody",
+    "artist": "Queen",
+    "genre": "Rock",
+    "duration_seconds": 354,
+    "source_url": "https://open.spotify.com/track/7tFiyTwD0nx5a1eklYtX2J"
+  },
+  {
+    "title": "Hotel California",
+    "artist": "Eagles",
+    "genre": "Classic rock",
+    "duration_seconds": 391,
+    "source_url": "https://open.spotify.com/track/40riOy7x9W7GXjyGp4pjAv"
+  },
+  {
+    "title": "Billie Jean",
+    "artist": "Michael Jackson",
+    "genre": "Pop",
+    "duration_seconds": 294,
+    "source_url": "https://open.spotify.com/track/5ChkMS8OtdzJeqyybCc9R5"
+  },
+  {
+    "title": "Rolling in the Deep",
+    "artist": "Adele",
+    "genre": "Soul-pop",
+    "duration_seconds": 228,
+    "source_url": "https://open.spotify.com/track/1c8gk2PeTE04A1pIDH9YMk"
+  },
+  {
+    "title": "Someone Like You",
+    "artist": "Adele",
+    "genre": "Pop ballad",
+    "duration_seconds": 285,
+    "source_url": "https://open.spotify.com/track/4kflIGfjdZJW4ot2ioixTB"
+  },
+  {
+    "title": "Dance Monkey",
+    "artist": "Tones and I",
+    "genre": "Dance-pop",
+    "duration_seconds": 209,
+    "source_url": "https://open.spotify.com/track/2XU0oxnq2qxCpomAAuJY8K"
+  },
+  {
+    "title": "Stay",
+    "artist": "The Kid LAROI and Justin Bieber",
+    "genre": "Pop rap",
+    "duration_seconds": 141,
+    "source_url": "https://open.spotify.com/track/5PjdY0CKGZdEuoNab3yDmX"
+  },
+  {
+    "title": "As It Was",
+    "artist": "Harry Styles",
+    "genre": "Synth-pop",
+    "duration_seconds": 167,
+    "source_url": "https://open.spotify.com/track/4LRPiXqCikLlN15c3yImP7"
+  },
+  {
+    "title": "Flowers",
+    "artist": "Miley Cyrus",
+    "genre": "Pop",
+    "duration_seconds": 200,
+    "source_url": "https://open.spotify.com/track/0yLdNVWF3Srea0uzk55zFn"
+  },
+  {
+    "title": "Anti-Hero",
+    "artist": "Taylor Swift",
+    "genre": "Pop rock",
+    "duration_seconds": 200,
+    "source_url": "https://open.spotify.com/track/0V3wPSX9ygBnCm8psDIegu"
+  },
+  {
+    "title": "Believer",
+    "artist": "Imagine Dragons",
+    "genre": "Alternative rock",
+    "duration_seconds": 204,
+    "source_url": "https://open.spotify.com/track/0pqnGHJpmpxLKifKRmU6WP"
+  },
+  {
+    "title": "Sunflower",
+    "artist": "Post Malone and Swae Lee",
+    "genre": "Hip-hop",
+    "duration_seconds": 158,
+    "source_url": "https://open.spotify.com/track/0RiRZpuVRbi7oqRdSMwhQY"
+  },
+  {
+    "title": "Counting Stars",
+    "artist": "OneRepublic",
+    "genre": "Pop rock",
+    "duration_seconds": 257,
+    "source_url": "https://open.spotify.com/track/2tpWsVSb9UEmDRxAl1zhX1"
+  }
+]

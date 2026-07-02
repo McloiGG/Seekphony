@@ -216,3 +216,49 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- Project-specific ignores ---
+
+# Local secrets
+.env.*
+!.env.example
+!**/.env.example
+
+# Local runtime state
+var/
+backend/var/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+
+# Node / frontend
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+dist/
+frontend/dist/
+frontend/.vite/
+
+# Local uploaded/demo/generated data
+data/uploads/
+data/tmp/
+data/cache/
+*.webm
+*.wav
+*.mp3
+*.m4a
+
+# Allow committed demo/sample assets
+!data/samples/
+!data/samples/**
+
+# Local databases
+*.sqlite
+*.sqlite3
+*.db
+
+# Logs
+logs/

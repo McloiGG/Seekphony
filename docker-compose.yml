@@ -1,0 +1,31 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      SEEKPHONY_APP_NAME: "${SEEKPHONY_APP_NAME:-Seekphony Backend}"
+      SEEKPHONY_API_PREFIX: "${SEEKPHONY_API_PREFIX:-/api/v1}"
+      SEEKPHONY_DATA_DIR: "${SEEKPHONY_DATA_DIR:-/app/var}"
+      SEEKPHONY_DATABASE_PATH: "${SEEKPHONY_DATABASE_PATH:-/app/var/seekphony.sqlite3}"
+      SEEKPHONY_SEED_PATH: "${SEEKPHONY_SEED_PATH:-/app/data/seeds/songs.json}"
+      SEEKPHONY_UPLOAD_DIR: "${SEEKPHONY_UPLOAD_DIR:-/app/var/uploads}"
+      SEEKPHONY_MAX_UPLOAD_BYTES: "${SEEKPHONY_MAX_UPLOAD_BYTES:-15728640}"
+      SEEKPHONY_PROVIDER_TIMEOUT_SECONDS: "${SEEKPHONY_PROVIDER_TIMEOUT_SECONDS:-8}"
+      SEEKPHONY_PROVIDER_RETRY_COUNT: "${SEEKPHONY_PROVIDER_RETRY_COUNT:-2}"
+      SEEKPHONY_PROVIDER_RETRY_DELAY_SECONDS: "${SEEKPHONY_PROVIDER_RETRY_DELAY_SECONDS:-0.5}"
+      SEEKPHONY_ENABLE_SHAZAMIO: "${SEEKPHONY_ENABLE_SHAZAMIO:-false}"
+      SEEKPHONY_CORS_ORIGINS: "${SEEKPHONY_CORS_ORIGINS:-*}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GOOGLE_API_KEY: "${GOOGLE_API_KEY:-}"
+      SEEKPHONY_GEMINI_MODEL: "${SEEKPHONY_GEMINI_MODEL:-gemini-2.5-flash}"
+    ports:
+      - "8000:8000"
+    volumes:
+      - seekphony-backend-data:/app/var
+
+volumes:
+  seekphony-backend-data:
