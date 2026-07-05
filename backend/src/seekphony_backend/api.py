@@ -85,8 +85,7 @@ def register_routes(app: FastAPI, services: AppServices) -> None:
             _validate_upload(content, services.settings.max_upload_bytes)
             
             # --- ☁️ CONFIGURING YOUR ACRCLOUD CONSOLE KEYS ---
-            # Paste your new credentials from your ACRCloud project screen right here!
-            host = "identify-ap-southeast-1.acrcloud.com".strip()          # e.g., "identify-eu-west-1.acrcloud.com"
+            host = "identify-ap-southeast-1.acrcloud.com".strip()
             access_key = "eee0bb77e41fc3e62f57838bf435ddaa".strip()
             access_secret = "4f1kMWNlicePoMTFZEZWctFbYU8HQ5ClDRx1Q04G".strip()
 
@@ -97,7 +96,6 @@ def register_routes(app: FastAPI, services: AppServices) -> None:
             signature_version = "1"
             timestamp = str(int(time.time()))
 
-            # Generate authentication cryptographic signatures
             string_to_sign = f"{http_method}\n{http_uri}\n{access_key}\n{data_type}\n{signature_version}\n{timestamp}"
             sign = base64.b64encode(
                 hmac.new(access_secret.encode('utf-8'), string_to_sign.encode('utf-8'), digestmod=hashlib.sha1).digest()
@@ -115,67 +113,50 @@ def register_routes(app: FastAPI, services: AppServices) -> None:
                 'signature_version': signature_version
             }
 
-            # --- Ship audio payload directly to the cloud matching backend ---
             response = requests.post(requrl, data=data_payload, files=files_payload, timeout=10)
             
             if response.status_code == 200:
                 result = response.json()
                 
-                # 🛠️ DIAGNOSTIC ENGINE LOOKUP: Print out exactly what the AI responded with
                 acr_status = result.get("status", {})
                 print(f"--- 🤖 ACRCLOUD AI DIAGNOSTICS ---")
                 print(f"AI Response Code: {acr_status.get('code')}")
                 print(f"AI Message String: {acr_status.get('msg')}")
-                print(f"Raw Metadata Output: {result.get('metadata', 'No metadata returned')}")
                 print(f"----------------------------------")
                 
+                # Check if custom humming registry matched or generic music database matched
                 if acr_status.get("code") == 0 and "metadata" in result:
                     metadata = result["metadata"]
                     track_info = None
                     
-                    if "custom_files" in metadata and metadata["custom_files"]:
+                    if "humming" in metadata and metadata["humming"]:
+                        track_info = metadata["humming"][0]
+                    elif "custom_files" in metadata and metadata["custom_files"]:
                         track_info = metadata["custom_files"][0]
                     elif "music" in metadata and metadata["music"]:
                         track_info = metadata["music"][0]
                         
                     if track_info:
                         detected_title = track_info.get("title", "Unknown Track")
-                        detected_artist = track_info.get("artists", [{}])[0].get("name") if "artists" in track_info else track_info.get("artist", "Unknown Artist")
                         
-                        local_match = None
-                        
-                        # 🔍 Step 1: Query your actual injected database session safely
-                        try:
-                            # Replace 'db' here if your endpoint parameter has a different name
-                            local_match = db.query(Song).filter(
-                                Song.title.ilike(f"%{detected_title}%")
-                            ).first()
-                        except Exception as db_err:
-                            print(f" Could not query database directly: {db_err}")
-
-                        # 🌐 Step 2: Use matching ID if found locally
-                        if local_match:
-                            matched_song = {
-                                "id": local_match.id,  # 🎉 Uses your real local ID (e.g., 1, 2)
-                                "title": local_match.title,
-                                "artist": local_match.artist,
-                                "genre": local_match.genre,
-                                "play_count": getattr(local_match, 'play_count', 0) or 0
-                            }
-                            print(f"🔗 Linked cloud recognition to local database Track ID: {local_match.id}")
+                        # Handle array structure variations for artist list strings safely
+                        if "artists" in track_info and isinstance(track_info["artists"], list) and len(track_info["artists"]) > 0:
+                            detected_artist = track_info["artists"][0].get("name", "Unknown Artist")
                         else:
-                            # 🛡️ Step 3: Fallback if the song isn't in your local database list yet
-                            matched_song = {
-                                "id": 999, 
-                                "title": detected_title,
-                                "artist": detected_artist,
-                                "genre": "Identified Audio Track",
-                                "play_count": 0
-                            }
-                            print(f"⚠️ ACRCloud Match Confirmed, but track '{detected_title}' is missing from your local library.")
-                            
+                            detected_artist = track_info.get("artist", "Unknown Artist")
+                        
+                        # 🌐 Bypassing local DB lookups to route straight to your custom Frontend YouTube engine!
+                        matched_song = {
+                            "id": 999, 
+                            "title": detected_title,
+                            "artist": detected_artist,
+                            "genre": "Identified Humming Track",
+                            "play_count": 0
+                        }
+                        print(f"⚠️ Track identified: '{detected_title}' by {detected_artist}. Offloading to Frontend YouTube pipeline.")
                         return {"song": matched_song}
-            
+
+            # If it gets past the 'if track_info' block or response fails, raise the 404 explicitly
             raise AppError(404, "not_found", "Acoustic signature could not be identified inside cloud charts.")
 
         except AppError:

@@ -40,6 +40,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 });
 
+// Clear any running background YouTube audio streams instantly
+function stopYouTubeVideo() {
+    const iframe = document.getElementById('youtubePlayerFrame');
+    if (iframe) iframe.src = '';
+    
+    const targetBtn = document.getElementById(`play-btn-999`);
+    if (targetBtn) targetBtn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Play';
+}
+
+// Hook it up so that starting a new search or humming recording stops the background song automatically!
+document.getElementById('searchBar')?.addEventListener('focus', stopYouTubeVideo);
+document.getElementById('startRecordBtn')?.addEventListener('click', stopYouTubeVideo);
+
 function normalizeSong(song) {
     return {
         ...song,
@@ -158,19 +171,80 @@ async function handleTextSearch() {
     }
 }
 
+// --- ADD THIS AT THE TOP OF YOUR GLOBAL STATE IN APP.JS ---
+const YOUTUBE_API_KEY = "YOUR_YOUTUBE_API_KEY"; // Optional: Put your Google Console v3 Key here if you have one.
+
+// Helper function to stop video when modal closes
+function stopYouTubeVideo() {
+    const iframe = document.getElementById('youtubePlayerFrame');
+    if (iframe) iframe.src = '';
+}
+
+// New function to query YouTube and open player stream immediately
+// Function to instantly stream audio in the background from YouTube
+async function searchAndPlayYouTube(title, artist) {
+    const query = `${title} ${artist} audio`;
+    const alertContainer = "mainAlertContainer";
+    
+    showSystemAlert(alertContainer, `Loading stream for "${title}"...`, "info");
+
+    try {
+        let videoId = "";
+
+        if (YOUTUBE_API_KEY && YOUTUBE_API_KEY !== "YOUR_YOUTUBE_API_KEY") {
+            // Standard Official Google Cloud YouTube v3 Route
+            const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query)}&type=video&maxResults=1&key=${YOUTUBE_API_KEY}`;
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data.items && data.items.length > 0) {
+                videoId = data.items[0].id.videoId;
+            }
+        } else {
+            // Alternative Free/No-Key Parsing Fallback Layer
+            const fallbackUrl = `https://images${Math.floor(Math.random() * 3) + 1}-focus-opensocial.googleusercontent.com/gadgets/proxy?container=none&url=${encodeURIComponent('https://www.youtube.com/results?search_query=' + encodeURIComponent(query))}`;
+            const res = await fetch(fallbackUrl);
+            const html = await res.text();
+            const match = html.match(/"videoId":"([^"]+)"/);
+            if (match) videoId = match[1];
+        }
+
+        if (videoId) {
+            // Stop local synthesizer/mock audio tracking if running
+            if (activeAudioPlayer) {
+                activeAudioPlayer.pause();
+                document.querySelectorAll('[id^="play-btn-"]').forEach(btn => btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Play');
+            }
+
+            // Instantly direct audio payload straight into the background iframe
+            const playerFrame = document.getElementById('youtubePlayerFrame');
+            // FIX: Added autoplay rules alongside the native origin verification layer to guarantee instant streaming
+            playerFrame.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=0&controls=1&origin=${encodeURIComponent(window.location.origin)}`;
+
+            // Change the dashboard button layout to show it's playing
+            const targetBtn = document.getElementById(`play-btn-999`);
+            if (targetBtn) {
+                targetBtn.innerHTML = '<i class="bi bi-soundwave text-warning me-1"></i>Streaming';
+            }
+
+            showSystemAlert(alertContainer, `Now streaming "${title}" by ${artist} directly inside the application dashboard!`, "success");
+        } else {
+            showSystemAlert(alertContainer, "Could not extract streaming versions from YouTube records.", "warning");
+        }
+    } catch (err) {
+        console.error("YouTube redirection engine failure:", err);
+        showSystemAlert(alertContainer, "Failed to communicate with YouTube search pipeline.", "danger");
+    }
+}
+
+// --- UPDATE YOUR OVERRIDDEN AUDIO SEARCH ROUTE BRIDGE ---
 async function handleAudioSearch(audioBlob) {
-    // Locate or create an alert area container anchor in your template layout
     const alertContainer = "mainAlertContainer"; 
     
     try {
-        // Clear any old warnings off the alert window before starting a new search
         document.getElementById('alertContainer').innerHTML = '';
-
         const formData = new FormData();
-        // Append the webm chunk capturing voice parameters securely 
         formData.append('file', audioBlob, 'recording.webm');
 
-        // 1. Send the file payload directly to your versioned FastAPI endpoint base layout
         const response = await fetch(`${API_BASE_URL}/api/v1/search/audio`, {
             method: 'POST',
             body: formData
@@ -178,32 +252,33 @@ async function handleAudioSearch(audioBlob) {
         
         const result = await response.json();
 
-        // 2. THE NEW DECISION BRIDGE ROUTING ENGINE
         if (response.ok && result.song) {
-            // Normalize matching track data payload
             const match = normalizeSong(result.song);
 
-            // Append it to the client side dictionary cache pool if it isn't registered yet
-            if (!dynamicCatalog.some(s => s.id === match.id)) {
-                dynamicCatalog.push(match);
+            // Check if it's the database fallback track (ID 999)
+            if (match.id === 999) {
+                showSystemAlert(alertContainer, `Acoustic Match Confirmed: "${match.title}" by ${match.artist}. Fetching from YouTube...`, "info");
+                
+                // Show temporary card so user sees it in dashboard context
+                renderCatalog([match]);
+                
+                // Trigger the automated YouTube pipeline!
+                await searchAndPlayYouTube(match.title, match.artist);
+            } else {
+                // Regular pipeline: Track exists in your local database storage
+                if (!dynamicCatalog.some(s => s.id === match.id)) {
+                    dynamicCatalog.push(match);
+                }
+                renderCatalog([match]);
+                updateDashboardCharts();
+                updateTotalPlaytimeFromCatalog();
+                showSystemAlert(alertContainer, `Acoustic Match Confirmed: "${match.title}" by ${match.artist}!`, "success");
             }
-
-            // Render it explicitly onto the catalog screen grid view layout 
-            renderCatalog([match]);
-            updateDashboardCharts();
-            updateTotalPlaytimeFromCatalog();
-            
-            showSystemAlert(alertContainer, `Acoustic Match Confirmed: "${match.title}" by ${match.artist}!`, "success");
-        } 
-        else if (result.status === "no_match" || !result.song) {
-            // 🚀 TARGET FALLBACK INTEGRATION POINT:
-            // ACRCloud returned a clean response but found no match, clear catalog cards and trigger your ingestion wizard banner!
+        } else if (result.status === "no_match" || !result.song) {
             renderCatalog([]);
             promptCatalogIngestion();
-            
             showSystemAlert(alertContainer, "Acoustic signature could not be identified inside cloud charts.", "warning");
         }
-
     } catch (error) {
         console.error("Audio detection flow network exception:", error);
         renderCatalog([]);
@@ -425,8 +500,10 @@ function renderCatalog(songs) {
                             <small class="text-primary tracking-monospace" style="font-size: 0.75rem;">Plays: ${plays}</small>
                         </div>
                         <div class="d-flex flex-column gap-2">
-                            <button id="play-btn-${song.id}" class="btn btn-sm btn-primary" onclick="simulatePlayback(${song.id})" title="Play/Pause Track">
-                                <i class="bi bi-play-fill me-1"></i>Play
+                            <button id="play-btn-${song.id}" class="btn btn-sm btn-primary" 
+                             onclick="${song.id === 999 ? `searchAndPlayYouTube('${escapeHtml(song.title)}', '${escapeHtml(song.artist)}')` : `simulatePlayback(${song.id})`}" 
+                                 title="Play Track">
+                                    <i class="bi bi-play-fill me-1"></i>Play
                             </button>
                             <button class="btn btn-sm btn-outline-danger" onclick="deleteSongTrack(${song.id})" title="Delete Track">
                                 <i class="bi bi-trash-fill me-1"></i>Delete
