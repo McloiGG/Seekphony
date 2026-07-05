@@ -6,7 +6,6 @@ import re
 import subprocess
 import sys
 
-
 EXPECTED_PYTHON = (3, 14)
 EXPECTED_UV = (0, 8)
 EXPECTED_RUFF = (0, 15)
@@ -24,7 +23,11 @@ def parse_version(output: str) -> tuple[int, int, int]:
     return tuple(int(part) for part in match.groups())
 
 
-def require_major_minor(name: str, version: tuple[int, int, int], expected: tuple[int, int]):
+def require_major_minor(
+    name: str,
+    version: tuple[int, int, int],
+    expected: tuple[int, int],
+):
     actual = version[:2]
     if actual != expected:
         expected_text = ".".join(str(part) for part in expected)

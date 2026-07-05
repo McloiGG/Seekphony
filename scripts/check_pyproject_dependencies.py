@@ -9,7 +9,6 @@ import tomllib
 from collections.abc import Iterable
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = ROOT / "pyproject.toml"
 EXCLUDED_DIRS = {
@@ -118,7 +117,9 @@ def imported_modules() -> set[str]:
 
 
 def import_names_for_package(config: dict, name: str) -> set[str]:
-    configured = config.get("tool", {}).get("seekphony", {}).get("dependency-imports", {})
+    configured = (
+        config.get("tool", {}).get("seekphony", {}).get("dependency-imports", {})
+    )
     value = configured.get(name)
     if isinstance(value, str):
         return {value}

@@ -6,7 +6,7 @@ import argparse
 import re
 import subprocess
 import sys
-
+from pathlib import Path
 
 HEADER_PATTERN = re.compile(
     r"^(?P<type>[a-z][a-z0-9-]*)"
@@ -33,6 +33,14 @@ def run_git_log(revision_range: str) -> list[tuple[str, str]]:
     return commits
 
 
+def subject_from_message_file(path: Path) -> str:
+    for line in path.read_text(encoding="utf-8").splitlines():
+        subject = line.strip()
+        if subject and not subject.startswith("#"):
+            return subject
+    return ""
+
+
 def validate_subject(subject: str) -> str | None:
     match = HEADER_PATTERN.match(subject)
     if match is None:
@@ -46,8 +54,31 @@ def validate_subject(subject: str) -> str | None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("revision_range", help="Git revision or revision range to inspect")
+    parser.add_argument(
+        "revision_range",
+        nargs="?",
+        help="Git revision or revision range to inspect",
+    )
+    parser.add_argument(
+        "--message-file",
+        type=Path,
+        help="Commit message file to inspect from a commit-msg hook",
+    )
     args = parser.parse_args()
+
+    if args.message_file is not None:
+        subject = subject_from_message_file(args.message_file)
+        error = validate_subject(subject)
+        if error is not None:
+            print("Commit message must follow Conventional Commits v1.0.0.")
+            print(f"- {subject!r} ({error})")
+            return 1
+
+        print("Commit message follows Conventional Commits v1.0.0.")
+        return 0
+
+    if args.revision_range is None:
+        parser.error("revision_range is required unless --message-file is used")
 
     commits = run_git_log(args.revision_range)
     if not commits:

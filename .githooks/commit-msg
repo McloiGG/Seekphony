@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+set -eu
+
+hook_dir=$(case "$0" in */*) printf "%s\n" "${0%/*}" ;; *) printf ".\n" ;; esac)
+. "${hook_dir}/_common.sh"
+
+cd "$(repo_root)"
+validate_commit_message_file "$1"

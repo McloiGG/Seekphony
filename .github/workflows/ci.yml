@@ -16,42 +16,14 @@ env:
   RUFF_VERSION: "0.15.20"
 
 jobs:
-  commit-messages:
-    name: Conventional Commits
+  quality-gate:
+    name: Quality Gate
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Validate commit messages
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PUSH_BEFORE_SHA: ${{ github.event.before }}
-        run: |
-          set -euo pipefail
-          zero_sha="0000000000000000000000000000000000000000"
-
-          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
-            range="${PR_BASE_SHA}..${PR_HEAD_SHA}"
-          elif [[ "${EVENT_NAME}" == "push" && "${PUSH_BEFORE_SHA}" != "${zero_sha}" ]]; then
-            range="${PUSH_BEFORE_SHA}..${GITHUB_SHA}"
-          else
-            range="${GITHUB_SHA}"
-          fi
-
-          python3 scripts/check_conventional_commits.py "${range}"
-
-  python-quality:
-    name: Python Quality
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -64,17 +36,5 @@ jobs:
       - name: Install pinned Python tools
         run: uv pip install --system "ruff==$RUFF_VERSION"
 
-      - name: Verify tool versions
-        run: python scripts/check_tool_versions.py
-
-      - name: Check dependency hygiene
-        run: python scripts/check_pyproject_dependencies.py
-
-      - name: Scan for exposed secrets
-        run: python scripts/scan_secrets.py
-
-      - name: Check Python formatting
-        run: ruff format --check .
-
-      - name: Lint Python code
-        run: ruff check .
+      - name: Run all checks
+        run: python scripts/check_all.py
