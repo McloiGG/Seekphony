@@ -6,13 +6,52 @@ hook_dir=$(case "$0" in */*) printf "%s\n" "${0%/*}" ;; *) printf ".\n" ;; esac)
 
 zero_sha="0000000000000000000000000000000000000000"
 ranges=""
+cr=$(printf "\r")
 
-while read -r local_ref local_oid remote_ref remote_oid; do
+default_base_ref() {
+    base_ref=$(run_git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)
+    if [ -n "${base_ref}" ]; then
+        printf "%s\n" "${base_ref}"
+        return 0
+    fi
+
+    if run_git rev-parse --verify origin/main >/dev/null 2>&1; then
+        printf "%s\n" "origin/main"
+        return 0
+    fi
+
+    if run_git rev-parse --verify origin/master >/dev/null 2>&1; then
+        printf "%s\n" "origin/master"
+        return 0
+    fi
+
+    return 1
+}
+
+while read -r local_ref local_oid remote_ref remote_oid || [ -n "${local_ref:-}" ]; do
+    local_ref=${local_ref%"${cr}"}
+    local_oid=${local_oid%"${cr}"}
+    remote_ref=${remote_ref%"${cr}"}
+    remote_oid=${remote_oid%"${cr}"}
+
     if [ "${local_oid}" = "${zero_sha}" ]; then
         continue
     fi
 
     if [ "${remote_oid}" = "${zero_sha}" ]; then
+        base_ref=$(default_base_ref || true)
+        if [ -n "${base_ref}" ]; then
+            merge_base=$(run_git merge-base "${base_ref}" "${local_oid}" || true)
+        else
+            merge_base=
+        fi
+
+        if [ -n "${merge_base}" ]; then
+            ranges="${ranges}
+${merge_base}..${local_oid}"
+            continue
+        fi
+
         ranges="${ranges}
 ${local_oid}"
     else
@@ -26,7 +65,8 @@ run_python_checks_if_possible
 run_ruff_if_possible
 
 for revision_range in ${ranges}; do
-    run_git log --format=%s "${revision_range}" | while IFS= read -r subject; do
+    subjects=$(run_git log --format=%s "${revision_range}") || exit 1
+    printf "%s\n" "${subjects}" | while IFS= read -r subject; do
         if ! validate_conventional_subject "${subject}"; then
             echo "Commit message must follow Conventional Commits v1.0.0." >&2
             echo "Range: ${revision_range}" >&2

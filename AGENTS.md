@@ -15,3 +15,11 @@ For development prompts that change code, configuration, workflows, or scripts:
 - Keep dependencies exact-pinned in `pyproject.toml`, and remove unused runtime
   packages unless they are OS-specific.
 - Never commit API keys, tokens, private keys, passwords, or other secrets.
+
+For documentation-pass prompts:
+
+- Review the full codebase before editing documentation.
+- Make README, QA docs, agent instructions, and development docs reflect the
+  current implementation.
+- Follow `docs/development/documentation_pass.md`.
+- Verify the changes, then open a pull request.

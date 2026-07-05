@@ -46,3 +46,28 @@ The hooks run the checks available on the local machine before commits and
 pushes, and validate the actual commit message. Missing local Python or Ruff
 does not block commits; GitHub Actions remains the full strict gate for Python
 `3.14.*`, `uv 0.8.*`, and `ruff 0.15.*`.
+
+## Local Data And QA
+
+Build deterministic sanitized production-like data:
+
+```powershell
+python scripts/build_local_data.py
+```
+
+If `.local_data/production_like` already exists, use `--force` to replace it:
+
+```powershell
+python scripts/build_local_data.py --force
+```
+
+The generated files are written to `.local_data/production_like` and ignored by
+Git. The current product QA inventory and blocked handoff are documented in
+`docs/qa/current_inventory.md`.
+
+## Documentation Passes
+
+Documentation passes must review the full codebase, update stale documentation
+to match the current implementation, verify the changes, and open a pull
+request. The detailed workflow is documented in
+`docs/development/documentation_pass.md`.

@@ -35,6 +35,30 @@ def command_text(command: list[str]) -> str:
     return " ".join(command)
 
 
+def git_output(command: list[str]) -> str | None:
+    result = subprocess.run(
+        ["git", *command],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def default_branch_range(default_branch: str | None, after_sha: str) -> str:
+    if not default_branch:
+        return after_sha
+
+    base_ref = f"origin/{default_branch}"
+    merge_base = git_output(["merge-base", base_ref, after_sha])
+    if not merge_base:
+        return after_sha
+    return f"{merge_base}..{after_sha}"
+
+
 def github_commit_range() -> str | None:
     event_name = os.environ.get("GITHUB_EVENT_NAME")
     event_path = os.environ.get("GITHUB_EVENT_PATH")
@@ -58,9 +82,11 @@ def github_commit_range() -> str | None:
     if event_name == "push":
         before_sha = event.get("before")
         after_sha = event.get("after") or github_sha
+        default_branch = event.get("repository", {}).get("default_branch")
         if before_sha and after_sha and before_sha != ZERO_SHA:
             return f"{before_sha}..{after_sha}"
-        return after_sha
+        if after_sha:
+            return default_branch_range(default_branch, after_sha)
 
     return github_sha
 
