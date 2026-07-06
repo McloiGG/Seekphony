@@ -262,3 +262,5 @@ data/cache/
 
 # Logs
 logs/
+
+.local_data/
