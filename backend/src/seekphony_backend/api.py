@@ -150,8 +150,29 @@ def register_routes(app: FastAPI, services: AppServices) -> None:
                             "overall": acr_score
                         }
                         
-                        print(f"⚠️ Track identified: '{detected_title}' by {detected_artist}. Offloading to Frontend YouTube pipeline.")
-                        return {"song": matched_song, "analysis": analysis_scores}
+                        # 🚀 NEW: DYNAMIC DEEZER PREVIEW FALLBACK RESOLUTION 🚀
+                        deezer_mp3_url = None
+                        try:
+                            deezer_query = f"{detected_artist} {detected_title}"
+                            deezer_api_url = f"https://api.deezer.com/search?q={requests.utils.quote(deezer_query)}&limit=1"
+                            
+                            deezer_res = requests.get(deezer_api_url, timeout=5)
+                            if deezer_res.status_code == 200:
+                                deezer_json = deezer_res.json()
+                                if "data" in deezer_json and len(deezer_json["data"]) > 0:
+                                    deezer_mp3_url = deezer_json["data"][0].get("preview")
+                        except Exception as e:
+                            # Fail cleanly so an external network hiccup won't break the frontend's response delivery
+                            print(f"Deezer backend-to-backend pipeline skip trace: {e}")
+
+                        print(f"⚠️ Track identified: '{detected_title}' by {detected_artist}. Offloading to Frontend media sources engine.")
+                        return {
+                            "song": matched_song, 
+                            "analysis": analysis_scores,
+                            "media_sources": {
+                                "deezer_mp3": deezer_mp3_url
+                            }
+                        }
 
             raise AppError(404, "not_found", "Acoustic signature could not be identified inside cloud charts.")
 

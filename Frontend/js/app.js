@@ -10,7 +10,7 @@ let hummingChartInstance = null;
 let recordingCountdownTimer = null;
 let overallGaugeChartInstance = null;
 // Optional: Add your custom Google Developer YouTube Data API Key here if needed
-const YOUTUBE_API_KEY = "YOUR_YOUTUBE_API_KEY_HERE"; // Replace with your actual API key or leave empty for fallback
+const YOUTUBE_API_KEY = "YOUR_YOUTUBE_API_KEY"; // Replace with your actual API key or leave empty for fallback
 
 function setupEventListeners() {
     document.getElementById('searchButton')?.addEventListener('click', handleTextSearch);
@@ -29,7 +29,7 @@ function stopYouTubeVideo() {
     if (iframe) iframe.src = '';
     updateYouTubeStreamLink('#', 'No stream loaded');
     
-    document.querySelectorAll('[id^="play-btn-"]').forEach(btn => {
+    document.querySelectorAll('[id^=\"play-btn-\"]').forEach(btn => {
         btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Play';
     });
 }
@@ -42,6 +42,70 @@ function normalizeSong(song) {
         genre: song.genre || "General",
         source_url: song.source_url || ""
     };
+}
+
+// Function to handle the direct MP3 preview playback
+function playDeezerMp3(mp3Url) {
+    if (!mp3Url) {
+        showSystemAlert("alertContainer", "No MP3 preview available for this track.", "warning");
+        return;
+    }
+
+    const mp3Player = document.getElementById('globalMp3Player');
+    const deezerBtn = document.getElementById('deezerPlayBtn');
+    if (!mp3Player || !deezerBtn) return;
+
+    // 1. If it's a completely new track or nothing is loaded yet
+    if (mp3Player.src !== mp3Url) {
+        stopYouTubeVideo(); // Kill YouTube if it's running
+        mp3Player.src = mp3Url;
+        mp3Player.play();
+        
+        deezerBtn.innerHTML = '<i class="bi bi-pause-fill me-1"></i> Pause Preview';
+        deezerBtn.classList.replace('btn-outline-info', 'btn-info');
+        showSystemAlert("alertContainer", "Streaming 30s MP3 preview from Deezer!", "success");
+        
+        // Listen for when the 30 seconds ends so the button resets itself automatically
+        mp3Player.onended = () => {
+            deezerBtn.innerHTML = '<i class="bi bi-music-note-beamed me-1"></i> Listen to MP3 Preview';
+            deezerBtn.classList.replace('btn-info', 'btn-outline-info');
+        };
+        return;
+    }
+
+    // 2. If it's the SAME track, toggle play/pause state
+    if (mp3Player.paused) {
+        stopYouTubeVideo(); // Ensure YouTube isn't fighting for audio on resume
+        mp3Player.play();
+        deezerBtn.innerHTML = '<i class="bi bi-pause-fill me-1"></i> Pause Preview';
+        deezerBtn.classList.replace('btn-info', 'btn-outline-info');
+    } else {
+        mp3Player.pause();
+        deezerBtn.innerHTML = '<i class="bi bi-play-fill me-1"></i> Resume Preview';
+        deezerBtn.classList.replace('btn-outline-info', 'btn-info');
+    }
+}
+
+// Wrap your existing YouTube initializer to safely pause native MP3s when clicked
+function playTrackOnYouTube() {
+    // 1. Fully kill and reset the native MP3 playback state
+    const mp3Player = document.getElementById('globalMp3Player');
+    if (mp3Player) {
+        mp3Player.pause();
+        mp3Player.src = "";
+    }
+    
+    // 2. Reset the Deezer button interface if it is currently visible on the screen
+    const deezerBtn = document.getElementById('deezerPlayBtn');
+    if (deezerBtn) {
+        deezerBtn.innerHTML = '<i class="bi bi-music-note-beamed me-1"></i> Listen to MP3 Preview';
+        deezerBtn.className = "btn btn-outline-info btn-sm px-3";
+    }
+    
+    // 3. Continue executing your existing native YouTube layout engine
+    if (dynamicCatalog.length > 0) {
+        searchAndPlayYouTube(dynamicCatalog[0].title, dynamicCatalog[0].artist); 
+    }
 }
 
 function extractYouTubeVideoId(value) {
@@ -104,6 +168,13 @@ async function handleTextSearch() {
 
     stopYouTubeVideo();
 
+    // Reset MP3 player if text search is used
+    const mp3Player = document.getElementById('globalMp3Player');
+    if (mp3Player) {
+        mp3Player.pause();
+        mp3Player.src = "";
+    }
+
     try {
         const response = await fetch(`${API_BASE_URL}/api/v1/search?q=${encodeURIComponent(query)}`);
         const data = await response.json();
@@ -112,6 +183,11 @@ async function handleTextSearch() {
             const matchedSong = normalizeSong(data.song);
             dynamicCatalog = [matchedSong];
             renderCatalog(dynamicCatalog);
+            
+            // Remove previous session dynamic media tray buttons if they exist
+            const oldTray = document.getElementById('dynamicMediaTray');
+            if (oldTray) oldTray.remove();
+
             showSystemAlert("alertContainer", `Match found: "${matchedSong.title}"`, "success");
         } else {
             renderCatalog([]);
@@ -131,8 +207,13 @@ async function toggleAudioRecording() {
     const recordingStatus = document.getElementById('recordingStatus');
 
     stopYouTubeVideo();
+    
+    const mp3Player = document.getElementById('globalMp3Player');
+    if (mp3Player) {
+        mp3Player.pause();
+        mp3Player.src = "";
+    }
 
-    // If already recording, stop it immediately on click
     if (mediaRecorder && mediaRecorder.state === "recording") {
         mediaRecorder.stop();
         return;
@@ -148,11 +229,9 @@ async function toggleAudioRecording() {
         };
 
         mediaRecorder.onstop = async () => {
-            // Clean up timer and UI states when recording stops
             clearInterval(recordingCountdownTimer);
             stream.getTracks().forEach(track => track.stop());
             
-            // Revert button layout back to standard mic icon state
             micButton.className = "btn btn-outline-danger d-flex align-items-center";
             micProgressText.classList.add('d-none');
             recordingStatus.classList.add('d-none');
@@ -162,10 +241,8 @@ async function toggleAudioRecording() {
             await handleAudioSearch(audioBlob);
         };
 
-        // Start recording
         mediaRecorder.start();
         
-        // Transform the button into an active red recording bar status indicator
         micButton.className = "btn btn-danger text-white d-flex align-items-center animate-pulse";
         micProgressText.classList.remove('d-none');
         recordingStatus.classList.remove('d-none');
@@ -174,7 +251,6 @@ async function toggleAudioRecording() {
         let timeLeft = 10;
         micProgressText.innerText = `Recording (${timeLeft}s)`;
 
-        // Update countdown text every second
         recordingCountdownTimer = setInterval(() => {
             timeLeft--;
             if (timeLeft > 0) {
@@ -192,6 +268,7 @@ async function toggleAudioRecording() {
         showSystemAlert("alertContainer", "Microphone access denied or audio hardware not found.", "danger");
     }
 }
+
 // --- AUDIOMATCH NETWORK BRIDGE ---
 async function handleAudioSearch(audioBlob) {
     try {
@@ -211,19 +288,19 @@ async function handleAudioSearch(audioBlob) {
             const match = normalizeSong(result.song);
             dynamicCatalog = [match];
             
-            // 1. Re-render catalog container grid structure
             renderCatalog(dynamicCatalog);
             
-            // 2. Refresh target metric charts
             if (result.analysis) {
                 if (result.analysis.overall <= 1.0) {
                     result.analysis.overall = Math.round(result.analysis.overall * 100);
                 } else {
                     result.analysis.overall = Math.round(result.analysis.overall);
                 }
-                
-                // Refresh target metric charts with safely adjusted integer types
                 renderHummingAnalysisChart(result.analysis);
+            }
+
+            if (result.media_sources) {
+                renderMediaActionButtons(result.media_sources);
             }
 
             updateYouTubeStreamLink(
@@ -231,15 +308,9 @@ async function handleAudioSearch(audioBlob) {
                 `${match.title} - ${match.artist}`
             );
 
-            const videoId = extractYouTubeVideoId(match.source_url);
-
-            if (videoId) {
-                showSystemAlert("alertContainer", `Acoustic Match Confirmed: "${match.title}" by ${match.artist}. Launching stream...`, "success");
-                playYouTubeEmbed(videoId);
-            } else {
-                showSystemAlert("alertContainer", `Acoustic Match Confirmed: "${match.title}" by ${match.artist}. Searching YouTube...`, "info");
-                await searchAndPlayYouTube(match.title, match.artist);
-            }
+            showSystemAlert("alertContainer", `Acoustic Match Confirmed: "${match.title}" by ${match.artist}. Media tray updated below charts!`, "success");
+            await searchAndPlayYouTube(match.title, match.artist);
+            
         } else {
             renderCatalog([]);
             showSystemAlert("alertContainer", "Vocal footprint could not be cleanly targeted inside databases.", "warning");
@@ -248,6 +319,36 @@ async function handleAudioSearch(audioBlob) {
         console.error(error);
         renderCatalog([]);
         showSystemAlert("alertContainer", "Audio tracking network gateway returned an execution exception.", "danger");
+    }
+}
+
+// UI Rendering engine for dynamic cross-platform option panels
+function renderMediaActionButtons(sources) {
+    const oldTray = document.getElementById('dynamicMediaTray');
+    if (oldTray) oldTray.remove();
+
+    const mediaActionButtonsHtml = `
+        <div id="dynamicMediaTray" class="mt-4 card p-3 shadow-sm border-0 bg-white">
+            <p class="text-muted small mb-2 text-center fw-medium">Select your listening experience:</p>
+            <div class="d-flex justify-content-center gap-3">
+                
+                <button class="btn btn-outline-danger btn-sm px-3" onclick="playTrackOnYouTube()">
+                    <i class="bi bi-youtube me-1"></i> Watch Video
+                </button>
+                
+                ${sources && sources.deezer_mp3 ? `
+                    <button id="deezerPlayBtn" class="btn btn-outline-info btn-sm px-3" onclick="playDeezerMp3('${sources.deezer_mp3}')">
+                        <i class="bi bi-music-note-beamed me-1"></i> Listen to MP3 Preview
+                    </button>
+                ` : ''}
+                
+            </div>
+        </div>
+    `;
+
+    const analysisContainer = document.getElementById('hummingAnalysisContainer');
+    if (analysisContainer) {
+        analysisContainer.insertAdjacentHTML('beforeend', mediaActionButtonsHtml);
     }
 }
 
@@ -266,7 +367,7 @@ async function searchAndPlayYouTube(title, artist) {
                 videoId = data.items[0].id.videoId;
             }
         } else {
-            const fallbackUrl = `https://images${Math.floor(Math.random() * 3) + 1}-focus-opensocial.googleusercontent.com/gadgets/proxy?container=none&url=${encodeURIComponent('https://www.youtube.com/results?search_query=' + encodeURIComponent(query))}`;
+            const fallbackUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
             const res = await fetch(fallbackUrl);
             const html = await res.text();
             const match = html.match(/"videoId":"([^"]+)"/);
@@ -299,7 +400,6 @@ function renderHummingAnalysisChart(analysis) {
     if (placeholder) placeholder.classList.add('d-none');
     if (container) container.classList.remove('d-none');
     
-    // --- 📊 SUB-CHART 1: RADAR GRAPH (CORE BREAKDOWN ATTRIBUTES ONLY) ---
     const ctxRadar = document.getElementById('hummingAnalysisChart')?.getContext('2d');
     if (ctxRadar) {
         const radarData = [
@@ -343,33 +443,28 @@ function renderHummingAnalysisChart(analysis) {
         }
     }
 
-    // --- 🧭 SUB-CHART 2: DOUGHNUT METER (DYNAMICALLY COLORED OVERALL MATCH GAUGE) ---
     const ctxGauge = document.getElementById('overallScoreChart')?.getContext('2d');
     const scoreDisplay = document.getElementById('gaugeScoreText');
     const insightDisplay = document.getElementById('gaugeInsightText');
     
     if (ctxGauge) {
         const score = analysis.overall;
-        
-        // Output text tracking injection updates
         if (scoreDisplay) scoreDisplay.innerText = `${score}%`;
 
-        // Insights Rule Palette & Label Engine Matcher
-        let gaugeColor = '#DC3545'; // Less than 60% (Red) Default
+        let gaugeColor = '#DC3545';
         let insightLabel = 'DISSAPOINTMENT!';
         
         if (score === 100) {
-            gaugeColor = '#FFD700'; // Exact 100% (Gold)
+            gaugeColor = '#FFD700';
             insightLabel = '🏆 PERFECT SCORE!';
         } else if (score >= 90 && score <= 99) {
-            gaugeColor = '#198754'; // 90% to 99% (Green)
+            gaugeColor = '#198754';
             insightLabel = '🟢 EXCELLENT SCORE!';
         } else if (score >= 60 && score <= 89) {
-            gaugeColor = '#8B4513'; // 60% to 89% (Brown)
+            gaugeColor = '#8B4513';
             insightLabel = '🟤 GOOD SCORE!';
         }
 
-        // Apply textual label evaluation and dynamically match text colors to the chart gauge color
         if (insightDisplay) {
             insightDisplay.innerText = insightLabel;
             insightDisplay.style.color = gaugeColor;
