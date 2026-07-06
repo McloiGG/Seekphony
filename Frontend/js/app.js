@@ -1,107 +1,138 @@
 /**
- * Seekphoney - Frontend Controller
- * Developer: Muhammad Ridzuan Bin Bakar
- * Target: Single-Page Multi-modal Dashboard Integration
+ * Seekphoney - Simplified Controller Focus
  */
 
-// --- GLOBAL STATE ---
 const API_BASE_URL = 'http://127.0.0.1:8000';
 let mediaRecorder = null;
 let audioChunks = [];
-let analyticsChartInstance = null;
-let simulatedPlaytimeMinutes = 0;
 let dynamicCatalog = [];
-
-// ADD THIS: Global audio element to play synthesised soundwaves/mock tunes
-let activeAudioPlayer = null;
-
-// --- INITIALIZATION ---
-document.addEventListener('DOMContentLoaded', async () => {
-    setupEventListeners();
-    initChart();
-    
-    // 1. Explicitly clear out the catalog grid so it stays completely blank on load
-    renderCatalog([]); 
-    
-    // 2. Silently fetch data ONLY to populate your analytics charts and totals,
-    // without rendering any cards to the UI screen!
-    try {
-        const response = await fetch(`${API_BASE_URL}/api/v1/songs`);
-        if (response.ok) {
-            const songs = await response.json();
-            dynamicCatalog = songs.map(normalizeSong);
-            
-            // Update the chart bars and total playtime statistics in the sidebar
-            updateDashboardCharts();
-            updateTotalPlaytimeFromCatalog();
-        }
-    } catch (e) {
-        console.error("Silent background sync failed:", e);
-    }
-});
-
-// Clear any running background YouTube audio streams instantly
-function stopYouTubeVideo() {
-    const iframe = document.getElementById('youtubePlayerFrame');
-    if (iframe) iframe.src = '';
-    
-    const targetBtn = document.getElementById(`play-btn-999`);
-    if (targetBtn) targetBtn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Play';
-}
-
-// Hook it up so that starting a new search or humming recording stops the background song automatically!
-document.getElementById('searchBar')?.addEventListener('focus', stopYouTubeVideo);
-document.getElementById('startRecordBtn')?.addEventListener('click', stopYouTubeVideo);
-
-function normalizeSong(song) {
-    return {
-        ...song,
-        plays: song.plays ?? song.play_count ?? 0
-    };
-}
-
-async function loadCatalogFromBackend() {
-    try {
-        const response = await fetch(`${API_BASE_URL}/api/v1/songs`);
-
-        if (!response.ok) {
-            throw new Error("Failed to load catalog");
-        }
-
-        const songs = await response.json();
-        dynamicCatalog = songs.map(normalizeSong);
-
-        renderCatalog(dynamicCatalog);
-        updateDashboardCharts();
-        updateTotalPlaytimeFromCatalog();
-    } catch (error) {
-        console.warn("Backend catalog unavailable. Using local demo catalog:", error);
-        renderCatalog(dynamicCatalog);
-        updateDashboardCharts();
-    }
-}
+let hummingChartInstance = null;
+let recordingCountdownTimer = null;
+let overallGaugeChartInstance = null;
+// Optional: Add your custom Google Developer YouTube Data API Key here if needed
+const YOUTUBE_API_KEY = "YOUR_YOUTUBE_API_KEY_HERE"; // Replace with your actual API key or leave empty for fallback
 
 function setupEventListeners() {
-    document.getElementById('searchBtn')?.addEventListener('click', handleTextSearch);
+    document.getElementById('searchButton')?.addEventListener('click', handleTextSearch);
     document.getElementById('searchInput')?.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') handleTextSearch();
     });
-
-    document.getElementById('micBtn')?.addEventListener('click', toggleAudioRecording);
-    document.getElementById('addSongForm')?.addEventListener('submit', handleAddSongSubmit);
-
-    document.getElementsByName('intakeMethod').forEach(radio => {
-        radio.addEventListener('change', handleIntakeToggle);
-    });
-
-    document.getElementById('analyzeUrlBtn')?.addEventListener('click', parseUrlMetadata);
-    document.getElementById('songFile')?.addEventListener('change', parseFileMetadata);
+    document.getElementById('micButton')?.addEventListener('click', toggleAudioRecording);
 }
 
-// --- MICROPHONE API RECORDER LOGIC ---
+document.addEventListener('DOMContentLoaded', () => {
+    setupEventListeners();
+});
+
+function stopYouTubeVideo() {
+    const iframe = document.getElementById('youtubePlayerFrame');
+    if (iframe) iframe.src = '';
+    updateYouTubeStreamLink('#', 'No stream loaded');
+    
+    document.querySelectorAll('[id^="play-btn-"]').forEach(btn => {
+        btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Play';
+    });
+}
+
+function normalizeSong(song) {
+    return {
+        id: song.id ?? 999,
+        title: song.title || "Unknown Track",
+        artist: song.artist || "Unknown Artist",
+        genre: song.genre || "General",
+        source_url: song.source_url || ""
+    };
+}
+
+function extractYouTubeVideoId(value) {
+    if (!value) return "";
+
+    const text = String(value).trim();
+    const patterns = [
+        /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/,
+        /[?&]v=([a-zA-Z0-9_-]{11})/,
+        /"videoId":"([a-zA-Z0-9_-]{11})"/,
+    ];
+
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match && match[1]) {
+            return match[1];
+        }
+    }
+
+    if (/^[a-zA-Z0-9_-]{11}$/.test(text)) {
+        return text;
+    }
+
+    return "";
+}
+
+function playYouTubeEmbed(videoId) {
+    const playerFrame = document.getElementById('youtubePlayerFrame');
+    if (!playerFrame) return false;
+
+    const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    playerFrame.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=0&controls=1&origin=${encodeURIComponent(window.location.origin)}`;
+
+    const streamLink = document.getElementById('youtubeStreamLink');
+    if (streamLink) {
+        streamLink.href = watchUrl;
+        streamLink.textContent = watchUrl;
+    }
+    return true;
+}
+
+function buildYouTubeSearchUrl(title, artist) {
+    const query = `${title} ${artist} official audio`.trim();
+    return `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+}
+
+function updateYouTubeStreamLink(url, label) {
+    const streamLink = document.getElementById('youtubeStreamLink');
+    if (!streamLink) return;
+
+    streamLink.href = url || '#';
+    streamLink.textContent = label || url || 'No stream loaded';
+}
+
+// --- TEXT SEARCH ASSIGNMENT FLOW ---
+async function handleTextSearch() {
+    const queryInput = document.getElementById('searchInput');
+    const query = queryInput ? queryInput.value.trim() : "";
+    if (!query) return;
+
+    stopYouTubeVideo();
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/v1/search?q=${encodeURIComponent(query)}`);
+        const data = await response.json();
+
+        if (response.ok && data.song) {
+            const matchedSong = normalizeSong(data.song);
+            dynamicCatalog = [matchedSong];
+            renderCatalog(dynamicCatalog);
+            showSystemAlert("alertContainer", `Match found: "${matchedSong.title}"`, "success");
+        } else {
+            renderCatalog([]);
+            showSystemAlert("alertContainer", data.message || "No exact match found in catalog.", "warning");
+        }
+    } catch (error) {
+        console.error(error);
+        showSystemAlert("alertContainer", "Search backend service is currently unreachable.", "danger");
+    }
+}
+
+// --- AUDIO RECORDING OPERATION ---
 async function toggleAudioRecording() {
+    const micButton = document.getElementById('micButton');
+    const micIcon = document.getElementById('micIcon');
+    const micProgressText = document.getElementById('micProgressText');
     const recordingStatus = document.getElementById('recordingStatus');
 
+    stopYouTubeVideo();
+
+    // If already recording, stop it immediately on click
     if (mediaRecorder && mediaRecorder.state === "recording") {
         mediaRecorder.stop();
         return;
@@ -110,7 +141,6 @@ async function toggleAudioRecording() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         audioChunks = [];
-
         mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
 
         mediaRecorder.ondataavailable = (event) => {
@@ -118,130 +148,55 @@ async function toggleAudioRecording() {
         };
 
         mediaRecorder.onstop = async () => {
+            // Clean up timer and UI states when recording stops
+            clearInterval(recordingCountdownTimer);
             stream.getTracks().forEach(track => track.stop());
+            
+            // Revert button layout back to standard mic icon state
+            micButton.className = "btn btn-outline-danger d-flex align-items-center";
+            micProgressText.classList.add('d-none');
             recordingStatus.classList.add('d-none');
+            micIcon.className = "bi bi-mic-fill me-1";
 
             const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
             await handleAudioSearch(audioBlob);
         };
 
+        // Start recording
         mediaRecorder.start();
+        
+        // Transform the button into an active red recording bar status indicator
+        micButton.className = "btn btn-danger text-white d-flex align-items-center animate-pulse";
+        micProgressText.classList.remove('d-none');
         recordingStatus.classList.remove('d-none');
+        micIcon.className = "bi bi-record-circle-fill text-white spinner-border-sm me-1";
 
-        setTimeout(() => {
-            if (mediaRecorder && mediaRecorder.state === "recording") {
-                mediaRecorder.stop();
+        let timeLeft = 10;
+        micProgressText.innerText = `Recording (${timeLeft}s)`;
+
+        // Update countdown text every second
+        recordingCountdownTimer = setInterval(() => {
+            timeLeft--;
+            if (timeLeft > 0) {
+                micProgressText.innerText = `Recording (${timeLeft}s)`;
+            } else {
+                clearInterval(recordingCountdownTimer);
+                if (mediaRecorder && mediaRecorder.state === "recording") {
+                    mediaRecorder.stop();
+                }
             }
-        }, 10000);
+        }, 1000);
 
     } catch (err) {
-        console.error("Microphone acquisition failure:", err);
-        showSystemAlert("alertContainer", "Microphone access denied. Check browser permissions.", "danger");
+        console.error("Microphone hardware error context:", err);
+        showSystemAlert("alertContainer", "Microphone access denied or audio hardware not found.", "danger");
     }
 }
-
-// --- FETCH NETWORK CALLS & WORKFLOWS ---
-async function handleTextSearch() {
-    const queryInput = document.getElementById('searchInput');
-    const query = queryInput ? queryInput.value.trim() : "";
-    
-    if (!query) return;
-
-    try {
-        // Use your versioned endpoint base url layout 
-        const response = await fetch(`${API_BASE_URL}/api/v1/search?q=${encodeURIComponent(query)}`);
-        const data = await response.json();
-
-        if (response.ok && data.song) {
-            // Normalize the single matching track entity 
-            const matchedSong = normalizeSong(data.song);
-            
-            // Render ONLY this specific track onto the dashboard layout container!
-            renderCatalog([matchedSong]);
-            
-            showSystemAlert("mainAlertContainer", `Match found: "${matchedSong.title}"`, "success");
-        } else {
-            // Clear out the display catalog list area if no match is found
-            renderCatalog([]);
-            showSystemAlert("mainAlertContainer", data.message || "No matching track found inside database storage.", "warning");
-        }
-    } catch (error) {
-        renderCatalog([]);
-        showSystemAlert("mainAlertContainer", "Backend search server is currently unreachable.", "danger");
-    }
-}
-
-// --- ADD THIS AT THE TOP OF YOUR GLOBAL STATE IN APP.JS ---
-const YOUTUBE_API_KEY = "YOUR_YOUTUBE_API_KEY"; // Optional: Put your Google Console v3 Key here if you have one.
-
-// Helper function to stop video when modal closes
-function stopYouTubeVideo() {
-    const iframe = document.getElementById('youtubePlayerFrame');
-    if (iframe) iframe.src = '';
-}
-
-// New function to query YouTube and open player stream immediately
-// Function to instantly stream audio in the background from YouTube
-async function searchAndPlayYouTube(title, artist) {
-    const query = `${title} ${artist} audio`;
-    const alertContainer = "mainAlertContainer";
-    
-    showSystemAlert(alertContainer, `Loading stream for "${title}"...`, "info");
-
-    try {
-        let videoId = "";
-
-        if (YOUTUBE_API_KEY && YOUTUBE_API_KEY !== "YOUR_YOUTUBE_API_KEY") {
-            // Standard Official Google Cloud YouTube v3 Route
-            const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query)}&type=video&maxResults=1&key=${YOUTUBE_API_KEY}`;
-            const res = await fetch(url);
-            const data = await res.json();
-            if (data.items && data.items.length > 0) {
-                videoId = data.items[0].id.videoId;
-            }
-        } else {
-            // Alternative Free/No-Key Parsing Fallback Layer
-            const fallbackUrl = `https://images${Math.floor(Math.random() * 3) + 1}-focus-opensocial.googleusercontent.com/gadgets/proxy?container=none&url=${encodeURIComponent('https://www.youtube.com/results?search_query=' + encodeURIComponent(query))}`;
-            const res = await fetch(fallbackUrl);
-            const html = await res.text();
-            const match = html.match(/"videoId":"([^"]+)"/);
-            if (match) videoId = match[1];
-        }
-
-        if (videoId) {
-            // Stop local synthesizer/mock audio tracking if running
-            if (activeAudioPlayer) {
-                activeAudioPlayer.pause();
-                document.querySelectorAll('[id^="play-btn-"]').forEach(btn => btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Play');
-            }
-
-            // Instantly direct audio payload straight into the background iframe
-            const playerFrame = document.getElementById('youtubePlayerFrame');
-            // FIX: Added autoplay rules alongside the native origin verification layer to guarantee instant streaming
-            playerFrame.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=0&controls=1&origin=${encodeURIComponent(window.location.origin)}`;
-
-            // Change the dashboard button layout to show it's playing
-            const targetBtn = document.getElementById(`play-btn-999`);
-            if (targetBtn) {
-                targetBtn.innerHTML = '<i class="bi bi-soundwave text-warning me-1"></i>Streaming';
-            }
-
-            showSystemAlert(alertContainer, `Now streaming "${title}" by ${artist} directly inside the application dashboard!`, "success");
-        } else {
-            showSystemAlert(alertContainer, "Could not extract streaming versions from YouTube records.", "warning");
-        }
-    } catch (err) {
-        console.error("YouTube redirection engine failure:", err);
-        showSystemAlert(alertContainer, "Failed to communicate with YouTube search pipeline.", "danger");
-    }
-}
-
-// --- UPDATE YOUR OVERRIDDEN AUDIO SEARCH ROUTE BRIDGE ---
+// --- AUDIOMATCH NETWORK BRIDGE ---
 async function handleAudioSearch(audioBlob) {
-    const alertContainer = "mainAlertContainer"; 
-    
     try {
-        document.getElementById('alertContainer').innerHTML = '';
+        showSystemAlert("alertContainer", "Analyzing hummingbird acoustic prints across the cloud...", "info");
+        
         const formData = new FormData();
         formData.append('file', audioBlob, 'recording.webm');
 
@@ -254,261 +209,229 @@ async function handleAudioSearch(audioBlob) {
 
         if (response.ok && result.song) {
             const match = normalizeSong(result.song);
-
-            // Check if it's the database fallback track (ID 999)
-            if (match.id === 999) {
-                showSystemAlert(alertContainer, `Acoustic Match Confirmed: "${match.title}" by ${match.artist}. Fetching from YouTube...`, "info");
-                
-                // Show temporary card so user sees it in dashboard context
-                renderCatalog([match]);
-                
-                // Trigger the automated YouTube pipeline!
-                await searchAndPlayYouTube(match.title, match.artist);
-            } else {
-                // Regular pipeline: Track exists in your local database storage
-                if (!dynamicCatalog.some(s => s.id === match.id)) {
-                    dynamicCatalog.push(match);
+            dynamicCatalog = [match];
+            
+            // 1. Re-render catalog container grid structure
+            renderCatalog(dynamicCatalog);
+            
+            // 2. Refresh target metric charts
+            if (result.analysis) {
+                if (result.analysis.overall <= 1.0) {
+                    result.analysis.overall = Math.round(result.analysis.overall * 100);
+                } else {
+                    result.analysis.overall = Math.round(result.analysis.overall);
                 }
-                renderCatalog([match]);
-                updateDashboardCharts();
-                updateTotalPlaytimeFromCatalog();
-                showSystemAlert(alertContainer, `Acoustic Match Confirmed: "${match.title}" by ${match.artist}!`, "success");
+                
+                // Refresh target metric charts with safely adjusted integer types
+                renderHummingAnalysisChart(result.analysis);
             }
-        } else if (result.status === "no_match" || !result.song) {
+
+            updateYouTubeStreamLink(
+                buildYouTubeSearchUrl(match.title, match.artist),
+                `${match.title} - ${match.artist}`
+            );
+
+            const videoId = extractYouTubeVideoId(match.source_url);
+
+            if (videoId) {
+                showSystemAlert("alertContainer", `Acoustic Match Confirmed: "${match.title}" by ${match.artist}. Launching stream...`, "success");
+                playYouTubeEmbed(videoId);
+            } else {
+                showSystemAlert("alertContainer", `Acoustic Match Confirmed: "${match.title}" by ${match.artist}. Searching YouTube...`, "info");
+                await searchAndPlayYouTube(match.title, match.artist);
+            }
+        } else {
             renderCatalog([]);
-            promptCatalogIngestion();
-            showSystemAlert(alertContainer, "Acoustic signature could not be identified inside cloud charts.", "warning");
+            showSystemAlert("alertContainer", "Vocal footprint could not be cleanly targeted inside databases.", "warning");
         }
     } catch (error) {
-        console.error("Audio detection flow network exception:", error);
+        console.error(error);
         renderCatalog([]);
-        showSystemAlert(alertContainer, "Audio recognition cloud network timed out or became unreachable.", "danger");
+        showSystemAlert("alertContainer", "Audio tracking network gateway returned an execution exception.", "danger");
     }
 }
 
-function handleSearchResponse(statusCode, data) {
-    document.getElementById('alertContainer').innerHTML = '';
-
-    if (statusCode === 200 && data.song) {
-        const match = normalizeSong(data.song);
-
-        if (!dynamicCatalog.some(s => s.id === match.id)) {
-            dynamicCatalog.push(match);
-        }
-
-        renderCatalog(dynamicCatalog);
-        updateDashboardCharts();
-        showSystemAlert("alertContainer", `Match Discovered: "${match.title}" by ${match.artist}!`, "success");
-    } else if (statusCode === 200 && data.status === "candidates") {
-        const candidates = data.candidates.map(candidate => normalizeSong(candidate.song));
-
-        renderCatalog(candidates);
-        updateDashboardCharts();
-        showSystemAlert("alertContainer", "No exact match found, but similar songs are available.", "info");
-    } else {
-        promptCatalogIngestion();
-    }
-}
-
-async function handleAddSongSubmit(e) {
-    e.preventDefault();
-    document.getElementById('modalAlertContainer').innerHTML = '';
-
-    const title = document.getElementById('modalTitle').value.trim();
-    const artist = document.getElementById('modalArtist').value.trim();
-    const genre = document.getElementById('modalGenre').value.trim();
-    const songUrl = document.getElementById('songUrl')?.value.trim();
-    const songFile = document.getElementById('songFile')?.files?.[0];
-
+// --- YOUTUBE BACKEND STREAM HANDOVER ---
+async function searchAndPlayYouTube(title, artist) {
+    const query = `${title} ${artist} audio`;
+    updateYouTubeStreamLink(buildYouTubeSearchUrl(title, artist), `${title} - ${artist}`);
     try {
-        let response;
+        let videoId = "";
 
-        if (songFile) {
-            const formData = new FormData();
-            formData.append('title', title);
-            formData.append('artist', artist);
-            formData.append('genre', genre);
-            formData.append('file', songFile);
-
-            response = await fetch(`${API_BASE_URL}/api/v1/songs`, {
-                method: 'POST',
-                body: formData
-            });
-        } else {
-            const payload = { title, artist, genre };
-
-            if (songUrl) {
-                payload.source_url = songUrl;
+        if (YOUTUBE_API_KEY) {
+            const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query)}&type=video&maxResults=1&key=${YOUTUBE_API_KEY}`;
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data.items && data.items.length > 0) {
+                videoId = data.items[0].id.videoId;
             }
-
-            response = await fetch(`${API_BASE_URL}/api/v1/songs`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-        }
-
-        const data = await response.json();
-
-        if (response.status === 409) {
-            showSystemAlert("modalAlertContainer", "Duplication detected! This track already exists in the global catalog database.", "danger");
-        } else if (response.ok && data.song) {
-            const savedSong = normalizeSong(data.song);
-
-            dynamicCatalog.push(savedSong);
-            renderCatalog(dynamicCatalog);
-            updateDashboardCharts();
-            updateTotalPlaytimeFromCatalog();
-
-            showSystemAlert("alertContainer", `Successfully cataloged "${savedSong.title}"!`, "success");
-
-            const modalEl = document.getElementById('addSongModal');
-            const modalInstance = bootstrap.Modal.getInstance(modalEl);
-            modalInstance?.hide();
-            e.target.reset();
         } else {
-            showSystemAlert("modalAlertContainer", data.message || data.detail || "Validation check failure.", "warning");
+            const fallbackUrl = `https://images${Math.floor(Math.random() * 3) + 1}-focus-opensocial.googleusercontent.com/gadgets/proxy?container=none&url=${encodeURIComponent('https://www.youtube.com/results?search_query=' + encodeURIComponent(query))}`;
+            const res = await fetch(fallbackUrl);
+            const html = await res.text();
+            const match = html.match(/"videoId":"([^"]+)"/);
+            if (match) videoId = match[1];
         }
-    } catch (error) {
-        handleErrorCommunication(error);
+
+        if (videoId) {
+            playYouTubeEmbed(videoId);
+            updateYouTubeStreamLink(`https://www.youtube.com/watch?v=${videoId}`, `${title} - ${artist}`);
+
+            const targetBtn = document.getElementById(`play-btn-999`);
+            if (targetBtn) {
+                targetBtn.innerHTML = '<i class="bi bi-soundwave text-warning me-1"></i>Streaming Now';
+                targetBtn.className = "btn btn-sm btn-warning";
+            }
+        } else {
+            showSystemAlert("alertContainer", "Could not capture active stream hooks from YouTube.", "warning");
+        }
+    } catch (err) {
+        console.error(err);
+        showSystemAlert("alertContainer", "YouTube interface parsing execution failure.", "danger");
     }
 }
 
-// --- SIMULATED PLAYER ENGINE & ANALYTICS INGESTION ---
-async function simulatePlayback(songId) {
-    console.log(`Initializing audio streaming telemetry track tracking for Song ID: ${songId}`);
+// --- RENDERING INTEGRATION FOR SCORING BREAKDOWN ---
+function renderHummingAnalysisChart(analysis) {
+    const container = document.getElementById('hummingAnalysisContainer');
+    const placeholder = document.getElementById('chartPlaceholder');
     
-    const playBtn = document.getElementById(`play-btn-${songId}`);
+    if (placeholder) placeholder.classList.add('d-none');
+    if (container) container.classList.remove('d-none');
     
-    // 1. RESUME/PAUSE TOGGLE CASE: If the user clicked the same song that is already active
-    if (activeAudioPlayer && activeAudioPlayer.src.includes(`/api/v1/songs/stream/${songId}`)) {
-        if (!activeAudioPlayer.paused) {
-            // The music is playing, so pause it
-            activeAudioPlayer.pause();
-            if (playBtn) playBtn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Play';
-            showSystemAlert("mainAlertContainer", "Playback paused.", "info");
+    // --- 📊 SUB-CHART 1: RADAR GRAPH (CORE BREAKDOWN ATTRIBUTES ONLY) ---
+    const ctxRadar = document.getElementById('hummingAnalysisChart')?.getContext('2d');
+    if (ctxRadar) {
+        const radarData = [
+            analysis.pitch,
+            analysis.melody,
+            analysis.tone,
+            analysis.clarity
+        ];
+
+        if (hummingChartInstance) {
+            hummingChartInstance.data.datasets[0].data = radarData;
+            hummingChartInstance.update();
         } else {
-            // The music is paused, so resume playing
-            await activeAudioPlayer.play();
-            if (playBtn) playBtn.innerHTML = '<i class="bi bi-pause-fill me-1"></i>Pause';
-            showSystemAlert("mainAlertContainer", "Playback resumed.", "success");
+            hummingChartInstance = new Chart(ctxRadar, {
+                type: 'radar',
+                data: {
+                    labels: ['Pitch Alignment', 'Melody Contours', 'Tone Profile', 'Clarity Level'],
+                    datasets: [{
+                        label: 'Match Confidence Metrics (%)',
+                        data: radarData,
+                        backgroundColor: 'rgba(220, 53, 69, 0.2)',
+                        borderColor: 'rgba(220, 53, 69, 1)',
+                        pointBackgroundColor: 'rgba(220, 53, 69, 1)',
+                        pointBorderColor: '#fff',
+                        pointHoverBackgroundColor: '#fff',
+                        pointHoverBorderColor: 'rgba(220, 53, 69, 1)'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        r: {
+                            angleLines: { display: true },
+                            suggestedMin: 0,
+                            suggestedMax: 100,
+                            ticks: { stepSize: 20 }
+                        }
+                    }
+                }
+            });
         }
-        return;
     }
 
-    // 2. NEW TRACK CASE: Reset previous audio state completely if playing a new song
-    if (activeAudioPlayer) {
-        activeAudioPlayer.pause();
-        // Reset all other button icons back to "Play"
-        document.querySelectorAll('[id^="play-btn-"]').forEach(btn => {
-            btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Play';
-        });
-    }
-
-    // Connect the HTML5 Audio interface to stream the actual backend audio file
-    try {
-        const streamUrl = `${API_BASE_URL}/api/v1/songs/stream/${songId}`;
-        activeAudioPlayer = new Audio(streamUrl);
+    // --- 🧭 SUB-CHART 2: DOUGHNUT METER (DYNAMICALLY COLORED OVERALL MATCH GAUGE) ---
+    const ctxGauge = document.getElementById('overallScoreChart')?.getContext('2d');
+    const scoreDisplay = document.getElementById('gaugeScoreText');
+    const insightDisplay = document.getElementById('gaugeInsightText');
+    
+    if (ctxGauge) {
+        const score = analysis.overall;
         
-        // Start streaming audio through browser sound system
-        await activeAudioPlayer.play();
-        if (playBtn) playBtn.innerHTML = '<i class="bi bi-pause-fill me-1"></i>Pause';
+        // Output text tracking injection updates
+        if (scoreDisplay) scoreDisplay.innerText = `${score}%`;
 
-        // Reset button icon when song finishes playing naturally
-        activeAudioPlayer.onended = () => {
-            if (playBtn) playBtn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Play';
-        };
-
-    } catch (e) {
-        console.error("Audio playback streaming engagement failed:", e);
-        showSystemAlert("mainAlertContainer", "Audio stream could not be loaded or format is unsupported.", "danger");
-    }
-
-    // ANALYTICS TELEMETRY SYNC (Keeps your play counting intact)
-    try {
-        const response = await fetch(`${API_BASE_URL}/api/v1/analytics/play`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ song_id: songId, duration_seconds: 10 })
-        });
-
-        if (response.ok) {
-            const data = await response.json();
-            
-            const matchingIndex = dynamicCatalog.findIndex(s => s.id === parseInt(songId));
-            if (matchingIndex !== -1 && data.song) {
-                dynamicCatalog[matchingIndex] = normalizeSong(data.song);
-                
-                updateDashboardCharts();
-                updateTotalPlaytimeFromCatalog();
-                
-                showSystemAlert("mainAlertContainer", `Now streaming: "${data.song.title}" by ${data.song.artist}`, "success");
-            }
+        // Insights Rule Palette & Label Engine Matcher
+        let gaugeColor = '#DC3545'; // Less than 60% (Red) Default
+        let insightLabel = 'DISSAPOINTMENT!';
+        
+        if (score === 100) {
+            gaugeColor = '#FFD700'; // Exact 100% (Gold)
+            insightLabel = '🏆 PERFECT SCORE!';
+        } else if (score >= 90 && score <= 99) {
+            gaugeColor = '#198754'; // 90% to 99% (Green)
+            insightLabel = '🟢 EXCELLENT SCORE!';
+        } else if (score >= 60 && score <= 89) {
+            gaugeColor = '#8B4513'; // 60% to 89% (Brown)
+            insightLabel = '🟤 GOOD SCORE!';
         }
-    } catch (error) {
-        console.error("Failed to post playback telemetry counters:", error);
-    }
-}
 
-// ADD THIS NEW FUNCTION RIGHT BELOW SIMULATEPLAYBACK TO HANDLE DELETION
-async function deleteSongTrack(songId) {
-    if (!confirm("Are you sure you want to delete this song permanently from the database?")) return;
+        // Apply textual label evaluation and dynamically match text colors to the chart gauge color
+        if (insightDisplay) {
+            insightDisplay.innerText = insightLabel;
+            insightDisplay.style.color = gaugeColor;
+        }
 
-    try {
-        const response = await fetch(`${API_BASE_URL}/api/v1/songs/${songId}`, {
-            method: 'DELETE'
-        });
+        const gaugeDataset = [score, 100 - score];
 
-        if (response.ok) {
-            showSystemAlert("mainAlertContainer", "Song record successfully deleted.", "success");
-            
-            // Stop audio if deleting the currently playing track
-            if (activeAudioPlayer && activeAudioPlayer.src.includes(`/api/v1/songs/stream/${songId}`)) {
-                activeAudioPlayer.pause();
-                activeAudioPlayer = null;
-            }
-
-            // Remove from local array and re-render dashboard
-            dynamicCatalog = dynamicCatalog.filter(s => s.id !== parseInt(songId));
-            renderCatalog(dynamicCatalog);
-            updateDashboardCharts();
-            updateTotalPlaytimeFromCatalog();
+        if (overallGaugeChartInstance) {
+            overallGaugeChartInstance.data.datasets[0].data = gaugeDataset;
+            overallGaugeChartInstance.data.datasets[0].backgroundColor = [gaugeColor, '#E9ECEF'];
+            overallGaugeChartInstance.update();
         } else {
-            showSystemAlert("alertContainer", "Failed to remove the song from backend database.", "danger");
+            overallGaugeChartInstance = new Chart(ctxGauge, {
+                type: 'doughnut',
+                data: {
+                    datasets: [{
+                        data: gaugeDataset,
+                        backgroundColor: [gaugeColor, '#E9ECEF'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    rotation: -90,      
+                    circumference: 180, 
+                    cutout: '80%',      
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { enabled: false }
+                    }
+                }
+            });
         }
-    } catch (error) {
-        console.error("Error deleting song:", error);
-        showSystemAlert("alertContainer", "Backend database server is unreachable.", "danger");
     }
 }
 
-// --- UI RENDERING & INJECTIONS ---
 function renderCatalog(songs) {
     const catalogGrid = document.getElementById('catalogGrid');
     if (!catalogGrid) return;
 
-    catalogGrid.innerHTML = songs.map(song => {
-        const plays = song.plays ?? song.play_count ?? 0;
+    if (songs.length === 0) {
+        catalogGrid.innerHTML = `
+            <div class="col-12 text-center text-muted py-4 bg-white rounded shadow-sm border">
+                <i class="bi bi-music-note fs-2 mb-2 d-block"></i> No music tracks active to display. Try searching or humming.
+            </div>
+        `;
+        return;
+    }
 
+    catalogGrid.innerHTML = songs.map(song => {
         return `
             <div class="col">
-                <div class="card h-100 shadow-sm border-0 border-start border-success border-3">
+                <div class="card shadow-sm border-0 border-start border-success border-3">
                     <div class="card-body d-flex justify-content-between align-items-center">
                         <div>
                             <h6 class="card-title mb-1 fw-bold">${escapeHtml(song.title)}</h6>
                             <p class="text-muted small mb-0">${escapeHtml(song.artist)} • <span class="badge bg-light text-dark">${escapeHtml(song.genre)}</span></p>
-                            <small class="text-primary tracking-monospace" style="font-size: 0.75rem;">Plays: ${plays}</small>
                         </div>
-                        <div class="d-flex flex-column gap-2">
-                            <button id="play-btn-${song.id}" class="btn btn-sm btn-primary" 
-                             onclick="${song.id === 999 ? `searchAndPlayYouTube('${escapeHtml(song.title)}', '${escapeHtml(song.artist)}')` : `simulatePlayback(${song.id})`}" 
-                                 title="Play Track">
-                                    <i class="bi bi-play-fill me-1"></i>Play
-                            </button>
-                            <button class="btn btn-sm btn-outline-danger" onclick="deleteSongTrack(${song.id})" title="Delete Track">
-                                <i class="bi bi-trash-fill me-1"></i>Delete
-                            </button>
-                        </div>
+                        <button id="play-btn-${song.id}" class="btn btn-sm btn-primary px-3" 
+                            onclick="searchAndPlayYouTube('${escapeHtml(song.title)}', '${escapeHtml(song.artist)}')" title="Play Track">
+                            <i class="bi bi-play-fill me-1"></i>Play
+                        </button>
                     </div>
                 </div>
             </div>
@@ -516,23 +439,9 @@ function renderCatalog(songs) {
     }).join('');
 }
 
-function promptCatalogIngestion() {
-    const container = document.getElementById('alertContainer');
-    container.innerHTML = `
-        <div class="alert alert-warning border-0 shadow-sm d-flex justify-content-between align-items-center my-3" role="alert">
-            <div>
-                <i class="bi bi-exclamation-triangle-fill me-2"></i>
-                <strong>No song available in database.</strong> Do you want to add the song?
-            </div>
-            <button class="btn btn-sm btn-dark shadow-sm" data-bs-toggle="modal" data-bs-target="#addSongModal">Yes, Add Song</button>
-        </div>
-    `;
-}
-
 function showSystemAlert(targetId, message, type) {
     const anchor = document.getElementById(targetId);
     if (!anchor) return;
-
     anchor.innerHTML = `
         <div class="alert alert-${type} alert-dismissible fade show shadow-sm border-0" role="alert">
             <i class="bi ${type === 'danger' ? 'bi-x-circle-fill' : type === 'success' ? 'bi-check-circle-fill' : 'bi-info-circle-fill'} me-2"></i>
@@ -542,11 +451,6 @@ function showSystemAlert(targetId, message, type) {
     `;
 }
 
-function handleErrorCommunication(err) {
-    console.error(err);
-    showSystemAlert("alertContainer", "System Connection Timeout. Ensure FastAPI is running on port 8000.", "danger");
-}
-
 function escapeHtml(str) {
     return String(str || "")
         .replace(/&/g, "&amp;")
@@ -554,144 +458,4 @@ function escapeHtml(str) {
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
-}
-
-// --- CHART.JS CONFIGURATION ---
-function initChart() {
-    const ctx = document.getElementById('analyticsChart')?.getContext('2d');
-    if (!ctx) return;
-
-    analyticsChartInstance = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: dynamicCatalog.map(s => s.title),
-            datasets: [{
-                label: 'Play Counts',
-                data: dynamicCatalog.map(s => s.plays ?? s.play_count ?? 0),
-                backgroundColor: 'rgba(25, 135, 84, 0.85)',
-                borderColor: '#198754',
-                borderWidth: 1,
-                borderRadius: 4
-            }]
-        },
-        options: {
-            responsive: true,
-            indexAxis: 'y',
-            scales: {
-                x: { beginAtZero: true, ticks: { stepSize: 1 } }
-            },
-            plugins: { legend: { display: false } }
-        }
-    });
-}
-
-// --- INTAKE CONTROL LOGIC ---
-function handleIntakeToggle(e) {
-    const urlContainer = document.getElementById('urlInputContainer');
-    const fileContainer = document.getElementById('fileInputContainer');
-
-    if (e.target.id === 'methodUrl') {
-        urlContainer.classList.remove('d-none');
-        fileContainer.classList.add('d-none');
-        document.getElementById('songFile').value = '';
-    } else {
-        urlContainer.classList.add('d-none');
-        fileContainer.classList.remove('d-none');
-        document.getElementById('songUrl').value = '';
-    }
-}
-
-async function parseUrlMetadata() {
-    const urlValue = document.getElementById('songUrl').value.trim();
-    if (!urlValue) return;
-
-    toggleExtractionLoader(true);
-
-    try {
-        const response = await fetch(`${API_BASE_URL}/api/v1/extract/url`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url: urlValue })
-        });
-
-        const data = await response.json();
-
-        if (response.ok) {
-            populateFormFields(data.title, data.artist, data.genre);
-        } else {
-            showSystemAlert("modalAlertContainer", data.message || data.detail || "URL processing failed.", "warning");
-        }
-    } catch (error) {
-        showSystemAlert("modalAlertContainer", "Backend processing engine unavailable.", "danger");
-    } finally {
-        toggleExtractionLoader(false);
-    }
-}
-
-async function parseFileMetadata(e) {
-    const localAudioFile = e.target.files[0];
-    if (!localAudioFile) return;
-
-    const filePayload = new FormData();
-    filePayload.append('file', localAudioFile);
-
-    toggleExtractionLoader(true);
-
-    try {
-        const response = await fetch(`${API_BASE_URL}/api/v1/extract/file`, {
-            method: 'POST',
-            body: filePayload
-        });
-
-        const data = await response.json();
-
-        if (response.ok) {
-            populateFormFields(data.title, data.artist, data.genre);
-        } else {
-            showSystemAlert("modalAlertContainer", data.message || data.detail || "Audio tags parsing failed.", "warning");
-        }
-    } catch (error) {
-        showSystemAlert("modalAlertContainer", "Backend metadata server unreachable.", "danger");
-    } finally {
-        toggleExtractionLoader(false);
-    }
-}
-
-function toggleExtractionLoader(show) {
-    const spinner = document.getElementById('extractionSpinner');
-    if (!spinner) return;
-
-    show ? spinner.classList.remove('d-none') : spinner.classList.add('d-none');
-}
-
-function populateFormFields(title, artist, genre) {
-    document.getElementById('modalTitle').value = title || '';
-    document.getElementById('modalArtist').value = artist || '';
-    document.getElementById('modalGenre').value = genre || '';
-
-    showSystemAlert("modalAlertContainer", "Seekphoney successfully populated matching information! Review before saving.", "success");
-}
-
-function updateDashboardCharts() {
-    if (!analyticsChartInstance) return;
-
-    const sortedSongs = [...dynamicCatalog]
-        .sort((a, b) => (b.plays ?? b.play_count ?? 0) - (a.plays ?? a.play_count ?? 0))
-        .slice(0, 5);
-
-    analyticsChartInstance.data.labels = sortedSongs.map(s => s.title);
-    analyticsChartInstance.data.datasets[0].data = sortedSongs.map(s => s.plays ?? s.play_count ?? 0);
-    analyticsChartInstance.update();
-}
-
-function updateTotalPlaytimeFromCatalog() {
-    const totalSeconds = dynamicCatalog.reduce((sum, song) => {
-        return sum + (song.total_listen_seconds || 0);
-    }, 0);
-
-    if (totalSeconds > 0) {
-        document.getElementById('totalPlaytime').innerText = `${Math.round(totalSeconds / 60)} mins`;
-    } else {
-        document.getElementById('totalPlaytime').innerText = `${simulatedPlaytimeMinutes} mins`;
-    }
 }
