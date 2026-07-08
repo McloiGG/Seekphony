@@ -241,6 +241,7 @@ pnpm-debug.log*
 dist/
 frontend/dist/
 frontend/.vite/
+*.tsbuildinfo
 
 # Local uploaded/demo/generated data
 data/uploads/

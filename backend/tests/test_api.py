@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import io
+import math
+import wave
 from pathlib import Path
 
 import pytest
@@ -11,109 +14,144 @@ from seekphony_backend.main import create_app
 
 @pytest.fixture()
 def client(tmp_path: Path) -> TestClient:
-    repo_root = Path(__file__).resolve().parents[2]
     settings = Settings(
         app_name="Seekphony Test Backend",
         api_prefix="/api/v1",
-        repo_root=repo_root,
+        repo_root=Path(__file__).resolve().parents[2],
         data_dir=tmp_path,
         database_path=tmp_path / "seekphony.sqlite3",
-        seed_path=repo_root / "data" / "seeds" / "songs.json",
+        database_url=None,
         upload_dir=tmp_path / "uploads",
-        max_upload_bytes=1024 * 1024,
-        provider_timeout_seconds=0.1,
-        provider_retry_count=0,
-        provider_retry_delay_seconds=0,
+        max_upload_bytes=2 * 1024 * 1024,
+        min_clip_seconds=5.0,
+        max_clip_seconds=60.0,
+        decode_timeout_seconds=1.0,
         gemini_api_key=None,
         gemini_model="gemini-2.5-flash",
-        enable_shazamio=False,
+        provider_timeout_seconds=0.1,
         cors_origins=("*",),
     )
     return TestClient(create_app(settings))
 
 
-def test_health_and_seeded_songs(client: TestClient) -> None:
-    health = client.get("/api/v1/health")
-    assert health.status_code == 200
-    assert health.json()["status"] == "ok"
+def test_health_reports_evaluator_runtime(client: TestClient) -> None:
+    response = client.get("/api/v1/health")
 
-    songs = client.get("/api/v1/songs")
-    assert songs.status_code == 200
-    assert len(songs.json()) >= 15
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["database"]["kind"] == "sqlite"
+    assert body["providers"]["gemini_configured"] is False
+    assert body["limits"]["max_clip_seconds"] == 60.0
 
 
-def test_text_search_found_with_local_fallback(client: TestClient) -> None:
-    response = client.post("/api/v1/search/text", json={"query": "Blinding Lights by The Weeknd"})
+def test_evaluation_returns_metrics_without_gemini(client: TestClient) -> None:
+    reference = make_wav(440.0, 6.0)
+    performance = make_wav(440.0, 6.0)
+
+    response = post_evaluation(client, reference, performance)
     body = response.json()
 
     assert response.status_code == 200
-    assert body["status"] == "found"
-    assert body["song"]["title"] == "Blinding Lights"
-    assert body["provider"]["fallback_used"] is True
+    assert body["status"] == "completed"
+    assert body["evaluation_id"] == 1
+    assert body["scores"]["overall"] > 80
+    assert body["scores"]["pitch"] > 80
+    assert body["metrics"]["key_shift_semitones"] == 0
+    assert body["metrics"]["voiced_coverage"] > 0.75
+    assert body["explanation"]["status"] == "unavailable"
+    assert "Gemini API key" in body["explanation"]["error"]
 
 
-def test_text_search_alias_reuses_logic(client: TestClient) -> None:
-    response = client.get("/api/search", params={"q": "Adele - Someone Like You"})
+def test_evaluation_acknowledges_transposed_performance(client: TestClient) -> None:
+    reference = make_wav(440.0, 6.0)
+    performance = make_wav(493.883, 6.0)
+
+    response = post_evaluation(client, reference, performance)
     body = response.json()
 
     assert response.status_code == 200
-    assert body["status"] == "found"
-    assert body["song"]["artist"] == "Adele"
+    assert body["metrics"]["key_shift_semitones"] == 2
+    assert body["scores"]["pitch"] > 70
 
 
-def test_add_song_and_duplicate_detection(client: TestClient) -> None:
-    payload = {
-        "title": "Midnight City",
-        "artist": "M83",
-        "genre": "Synth-pop",
-        "duration_seconds": 244,
-        "source_url": "https://example.com/m83/midnight-city",
-    }
-    created = client.post("/api/v1/songs", json=payload)
-    duplicate = client.post("/api/v1/songs", json=payload)
+def test_noisy_or_unvoiced_performance_returns_warning(client: TestClient) -> None:
+    reference = make_wav(440.0, 6.0)
+    performance = make_wav(0.0, 6.0, amplitude=0.0)
 
-    assert created.status_code == 200
-    assert created.json()["status"] == "created"
-    assert duplicate.status_code == 409
-    assert duplicate.json()["status"] == "duplicate_detected"
+    response = post_evaluation(client, reference, performance)
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["scores"]["coverage"] < 10
+    assert body["metrics"]["confidence"] < 0.5
+    assert body["warnings"]
+    assert body["segments"]
 
 
-def test_extract_file_and_audio_search_accept_uploaded_blob(client: TestClient) -> None:
-    files = {"file": ("The Weeknd - Blinding Lights.webm", b"fake-audio", "audio/webm")}
-    extracted = client.post("/api/v1/extract/file", files=files)
+def test_too_long_clip_is_rejected(client: TestClient) -> None:
+    reference = make_wav(440.0, 65.0)
+    performance = make_wav(440.0, 65.0)
 
-    assert extracted.status_code == 200
-    assert extracted.json()["title"] == "Blinding Lights"
-    assert extracted.json()["artist"] == "The Weeknd"
-    assert extracted.json()["file_sha256"]
+    response = post_evaluation(client, reference, performance, clip_duration_seconds=61.0)
 
-    audio = client.post(
-        "/api/v1/search/audio",
-        files={"file": ("The Weeknd - Blinding Lights.webm", b"fake-audio", "audio/webm")},
+    assert response.status_code == 422
+    assert response.json()["status"] == "validation_error"
+
+
+def test_invalid_audio_is_rejected(client: TestClient) -> None:
+    response = post_evaluation(client, b"not-a-wav", b"also-not-a-wav")
+
+    assert response.status_code == 422
+    assert response.json()["status"] == "audio_decode_failed"
+
+
+def test_evaluation_history_endpoints(client: TestClient) -> None:
+    response = post_evaluation(client, make_wav(440.0, 6.0), make_wav(440.0, 6.0))
+    evaluation_id = response.json()["evaluation_id"]
+
+    listed = client.get("/api/v1/evaluations")
+    fetched = client.get(f"/api/v1/evaluations/{evaluation_id}")
+
+    assert listed.status_code == 200
+    assert listed.json()["evaluations"][0]["evaluation_id"] == evaluation_id
+    assert fetched.status_code == 200
+    assert fetched.json()["evaluation_id"] == evaluation_id
+
+
+def post_evaluation(
+    client: TestClient,
+    reference: bytes,
+    performance: bytes,
+    *,
+    clip_duration_seconds: float = 5.0,
+) -> object:
+    return client.post(
+        "/api/v1/evaluations",
+        data={
+            "clip_start_seconds": "0",
+            "clip_duration_seconds": str(clip_duration_seconds),
+            "performance_start_seconds": "0",
+        },
+        files={
+            "reference": ("reference.wav", reference, "audio/wav"),
+            "performance": ("performance.wav", performance, "audio/wav"),
+        },
     )
-    body = audio.json()
-    assert audio.status_code == 200
-    assert body["status"] == "found"
-    assert body["song"]["title"] == "Blinding Lights"
 
 
-def test_play_session_and_analytics(client: TestClient) -> None:
-    song_id = client.get("/api/v1/songs").json()[0]["id"]
-    started = client.post("/api/v1/plays/start", json={"song_id": song_id})
-    stopped = client.post(f"/api/v1/plays/{started.json()['session_id']}/stop")
-    analytics = client.get("/api/v1/analytics")
-
-    assert started.status_code == 200
-    assert stopped.status_code == 200
-    assert stopped.json()["duration_seconds"] >= 1
-    assert analytics.status_code == 200
-    assert analytics.json()["total_listening_seconds"] >= 1
-    assert analytics.json()["recent_sessions"]
-
-
-def test_play_event_alias(client: TestClient) -> None:
-    song_id = client.get("/api/v1/songs").json()[0]["id"]
-    response = client.post("/api/analytics/play", json={"song_id": song_id, "duration_seconds": 42})
-
-    assert response.status_code == 200
-    assert response.json()["status"] == "recorded"
+def make_wav(frequency: float, duration_seconds: float, *, amplitude: float = 0.45) -> bytes:
+    sample_rate = 16_000
+    frame_count = int(sample_rate * duration_seconds)
+    output = io.BytesIO()
+    with wave.open(output, "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(sample_rate)
+        frames = bytearray()
+        for index in range(frame_count):
+            sample = amplitude * math.sin(2 * math.pi * frequency * (index / sample_rate))
+            value = int(max(-1.0, min(1.0, sample)) * 32767)
+            frames.extend(value.to_bytes(2, "little", signed=True))
+        writer.writeframes(bytes(frames))
+    return output.getvalue()

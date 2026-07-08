@@ -1,6 +1,6 @@
 # Seekphony Backend API Contract
 
-The canonical API prefix is `/api/v1`. Compatibility aliases exist for the current frontend prototype, but they must reuse the same backend services and business logic.
+The canonical API prefix is `/api/v1`.
 
 All error responses use this shape:
 
@@ -14,155 +14,112 @@ All error responses use this shape:
 }
 ```
 
-Important statuses: `found`, `candidates`, `not_found`, `created`, `duplicate_detected`, `validation_error`, `provider_unavailable`, `unsupported_source`, and `extraction_failed`.
+Important statuses include `validation_error`, `file_too_large`,
+`unsupported_audio`, `audio_decode_failed`, and `not_found`.
 
 ## Health
 
 `GET /api/v1/health`
 
-Aliases: `GET /health`
+Alias: `GET /health`
 
-Returns service status and provider configuration flags.
-
-## Songs
-
-`GET /api/v1/songs`
-
-Aliases: `GET /songs`, `GET /api/songs`
-
-Returns the catalog sorted by title.
-
-`POST /api/v1/songs`
-
-Aliases: `POST /api/songs`, `POST /api/songs/add`
-
-Accepts either JSON:
+Returns service status, configured persistence mode, provider flags, and limits:
 
 ```json
 {
-  "title": "Blinding Lights",
-  "artist": "The Weeknd",
-  "genre": "Synth-pop",
-  "duration_seconds": 200,
-  "source_url": "https://example.com/song"
-}
-```
-
-or multipart form fields with optional `file`.
-
-Duplicate response uses HTTP 409:
-
-```json
-{
-  "status": "duplicate_detected",
-  "message": "Duplication detected!",
-  "details": {
-    "duplicate": {}
+  "status": "ok",
+  "service": "Seekphony Backend",
+  "api_prefix": "/api/v1",
+  "database": {
+    "kind": "sqlite",
+    "postgres_configured": false
   },
-  "retryable": false,
-  "fallback_used": false
-}
-```
-
-Duplicates are checked by normalized title+artist, normalized source URL, and uploaded file SHA-256 when present.
-
-## Search
-
-`POST /api/v1/search/text`
-
-Body:
-
-```json
-{
-  "query": "Blinding Lights by The Weeknd"
-}
-```
-
-Alias: `GET /api/search?q=Blinding%20Lights`
-
-Returns:
-
-```json
-{
-  "status": "found",
-  "query_type": "text",
-  "provider": {
-    "provider": "local_text_extractor",
-    "stage": "text_extraction",
-    "fallback_used": true
+  "providers": {
+    "gemini_configured": false
   },
-  "extracted": {},
-  "song": {},
-  "candidates": [],
-  "message": "Match found."
+  "limits": {
+    "max_upload_bytes": 15728640,
+    "min_clip_seconds": 5,
+    "max_clip_seconds": 60
+  }
 }
 ```
 
-`POST /api/v1/search/audio`
+## Create Evaluation
 
-Alias: `POST /api/search/audio`
+`POST /api/v1/evaluations`
 
-Accepts multipart field `file` or `audio`. Audio capture is a frontend responsibility; the backend only receives uploaded blobs/files. Shazamio recognition is optional and falls back to local file metadata/hash behavior.
+Accepts multipart form data:
 
-Search statuses:
+- `reference`: audio file; WAV is supported directly, other formats use `ffmpeg`
+  when available.
+- `performance`: uploaded or browser-recorded singing audio.
+- `clip_start_seconds`: reference clip start, default `0`.
+- `clip_duration_seconds`: selected clip duration, default `30`; must be within
+  configured min/max.
+- `performance_start_seconds`: optional performance start offset, default `0`.
 
-- `found`: high-confidence match, `song` is populated.
-- `candidates`: no exact match, `candidates` contains ranked options.
-- `not_found`: no usable match, frontend should offer add-song flow.
-
-## Metadata Extraction
-
-`POST /api/v1/extract/file`
-
-Alias: `POST /api/extract/file`
-
-Accepts multipart field `file`. Core behavior is SHA-256 hashing and filename normalization. Audio tag extraction is optional when `mutagen` is installed.
-
-`POST /api/v1/extract/url`
-
-Alias: `POST /api/extract/url`
-
-Body:
+Response:
 
 ```json
 {
-  "url": "https://example.com/artist-song"
+  "status": "completed",
+  "evaluation_id": 1,
+  "created_at": "2026-07-08T00:00:00+00:00",
+  "reference_filename": "song.wav",
+  "performance_filename": "take.wav",
+  "clip_start_seconds": 0,
+  "clip_duration_seconds": 5,
+  "performance_start_seconds": 0,
+  "scores": {
+    "overall": 88.0,
+    "pitch": 91.0,
+    "rhythm": 84.0,
+    "stability": 90.0,
+    "coverage": 86.0,
+    "audio_quality": 87.0
+  },
+  "metrics": {
+    "key_shift_semitones": 0,
+    "pitch_error_cents": 22.0,
+    "timing_offset_ms": 40.0,
+    "voiced_coverage": 0.86,
+    "reference_voiced_ratio": 0.9,
+    "performance_voiced_ratio": 0.88,
+    "confidence": 0.87,
+    "reference_duration_seconds": 5.0,
+    "performance_duration_seconds": 5.0
+  },
+  "segments": [],
+  "warnings": [],
+  "explanation": {
+    "status": "unavailable",
+    "provider": "gemini",
+    "error": "Gemini API key is not configured.",
+    "content": null
+  }
 }
 ```
 
-URL extraction is best-effort. Rich extraction may use optional dependencies; otherwise the backend returns URL-normalized fallback metadata.
+Gemini receives only structured metrics, warnings, and weak segments. If Gemini is
+not configured or fails, metric scoring still returns.
 
-## Playback And Analytics
+## List Evaluations
 
-`POST /api/v1/plays/start`
+`GET /api/v1/evaluations?limit=20`
 
-Body:
+Returns recent saved evaluations:
 
 ```json
 {
-  "song_id": 1
+  "status": "ok",
+  "evaluations": []
 }
 ```
 
-`POST /api/v1/plays/{session_id}/stop`
+## Get Evaluation
 
-Stops a session and increments play count/listening time.
+`GET /api/v1/evaluations/{evaluation_id}`
 
-`POST /api/v1/plays/event`
-
-Alias: `POST /api/analytics/play`
-
-One-shot compatibility endpoint for frontend play buttons:
-
-```json
-{
-  "song_id": 1,
-  "duration_seconds": 180
-}
-```
-
-`GET /api/v1/analytics`
-
-Aliases: `GET /analytics`, `GET /api/analytics`
-
-Returns top songs, total listening seconds/minutes, recent sessions, recent recognitions, and last recognized song.
+Returns the same shape as create evaluation. Missing evaluations return HTTP 404
+with status `not_found`.

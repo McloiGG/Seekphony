@@ -6,17 +6,19 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     SEEKPHONY_REPO_ROOT=/app \
     SEEKPHONY_DATA_DIR=/app/var \
     SEEKPHONY_DATABASE_PATH=/app/var/seekphony.sqlite3 \
-    SEEKPHONY_SEED_PATH=/app/data/seeds/songs.json \
     SEEKPHONY_UPLOAD_DIR=/app/var/uploads
 
 WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir uv==0.8.22
 
 COPY backend/pyproject.toml /app/backend/pyproject.toml
 COPY backend/uv.lock /app/backend/uv.lock
 COPY backend/src /app/backend/src
-COPY data/seeds /app/data/seeds
 
 WORKDIR /app/backend
 

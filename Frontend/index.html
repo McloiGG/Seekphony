@@ -1,95 +1,17 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Seekphoney - Core Audio Dashboard</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
-</head>
-<body class="bg-light">
-
-    <nav class="navbar navbar-dark bg-dark shadow-sm">
-        <div class="container-fluid px-4">
-            <span class="navbar-brand mb-0 h1"><i class="bi bi-music-note-beamed me-2"></i>Seekphoney</span>
-            <span class="text-secondary small">Vocal Profile Dashboard</span>
-        </div>
-    </nav>
-
-    <div class="container-fluid p-4">
-        <div class="row g-4">
-            
-            <div class="col-lg-7">
-                <div class="card shadow-sm mb-4">
-                    <div class="card-body p-4">
-                        <h5 class="card-title mb-3">Discover Tracks</h5>
-                        <div class="input-group input-group-lg position-relative">
-                            <input type="text" id="searchInput" class="form-control" placeholder="Search by song name, artist, or lyrics...">
-                            <button class="btn btn-outline-danger d-flex align-items-center" type="button" id="micButton" style="transition: all 0.3s ease; min-width: 65px;">
-                                <i class="bi bi-mic-fill me-1" id="micIcon"></i>
-                                <span id="micProgressText" class="d-none small fw-bold ms-1">Recording (10s)</span>
-                            </button>
-                               
-                            <button class="btn btn-primary" type="button" id="searchButton">Search</button>
-                        </div>
-                        <div id="recordingStatus" class="form-text text-danger mt-2 d-none">
-                            <span class="spinner-grow spinner-grow-sm me-1" role="status"></span> Listening... Hum your melody now (10s max)
-                        </div>
-                    </div>
-                </div>
-
-                <div id="alertContainer"></div>
-
-                <h5 class="mb-3">Search Results / Catalog</h5>
-                <div class="row row-cols-1 g-3" id="catalogGrid">
-                    </div>
-            </div>
-
-            <!-- Hidden global browser player for direct streaming formats -->
-            <audio id="globalMp3Player" class="d-none"></audio>
-
-            <div class="col-lg-5">
-                <div class="card shadow-sm mb-4">
-                    <div class="card-body">
-                        <h5 class="card-title mb-3"><i class="bi bi-bar-chart-line-fill me-2 text-primary"></i>Confidence Scoring</h5>
-                        <div id="hummingAnalysisContainer" class="d-none">
-                            <hr>
-                            <h6 class="text-muted mb-3"><i class="bi bi-waveform text-danger me-1"></i>Humming Analysis Match Profile</h6>
-                            <canvas id="hummingAnalysisChart" width="100" height="100" class="mb-4"></canvas>
-
-                            <hr class="my-4">
-
-                            <h6 class="text-muted mb-1 text-center"><i class="bi bi-shield-check text-primary me-1"></i>Overall Integrity Match Gauge</h6>
-                            <div id="gaugeInsightText" class="text-center fw-bold mb-3 small uppercase tracking-wider"></div>
-                            <div class="position-relative mx-auto mb-3" style="max-width: 250px;">
-                              <canvas id="overallScoreChart" width="200" height="130"></canvas>  
-                              <div id="gaugeScoreText" class="position-absolute start-50 top-100 translate-middle fw-bold fs-3 text-center" style="margin-top: -25px;">0%</div>
-                            </div>
-                        </div>
-                        <div id="chartPlaceholder" class="text-center text-muted py-5">
-                            <i class="bi bi-mic fs-1 d-block mb-2"></i>
-                            <p class="small">Hum or use text search to populate dynamic matching metric calculations.</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-        </div>
-    </div>
-
-    <div id="hiddenYoutubeContainer" style="position: fixed; bottom: 20px; left: 20px; right: auto; width: 280px; height: 178px; z-index: 1050; border-radius: 10px; overflow: hidden; box-shadow: 0 8px 24px rgba(0,0,0,0.45); background-color: #111; border: 1px solid #333; max-width: calc(100vw - 40px);">
-        <div style="background: #222; padding: 4px 10px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333;">
-            <span style="color: #fff; font-size: 0.75rem; font-weight: bold;"><i class="bi bi-youtube text-danger me-2"></i>Active YouTube Stream</span>
-            <button type="button" class="btn btn-sm p-0 text-secondary" style="border:none; background:none;" onclick="stopYouTubeVideo()" title="Stop music"><i class="bi bi-x-circle-fill fs-6"></i></button>
-        </div>
-        <iframe id="youtubePlayerFrame" src="" style="width: 100%; height: 115px; border: none;" allow="autoplay; encrypted-media"></iframe>
-        <div style="padding: 4px 10px; background: #181818; border-top: 1px solid #333; height: 33px;">
-            <a id="youtubeStreamLink" href="#" target="_blank" rel="noopener noreferrer" style="color: #9ecbff; font-size: 0.72rem; text-decoration: none; display: inline-block; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">No stream loaded</a>
-        </div>
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="js/app.js"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Seekphony explainable reference-match singing evaluation."
+    />
+    <title>Seekphony</title>
+    <script src="/config.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>
