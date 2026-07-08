@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from seekphony_backend.application import create_app
 from seekphony_backend.core.config import Settings
-from seekphony_backend.main import create_app
 
 
 @pytest.fixture()
@@ -21,13 +21,12 @@ def client(tmp_path: Path) -> TestClient:
         data_dir=tmp_path,
         database_path=tmp_path / "seekphony.sqlite3",
         database_url=None,
-        upload_dir=tmp_path / "uploads",
         max_upload_bytes=2 * 1024 * 1024,
         min_clip_seconds=5.0,
         max_clip_seconds=60.0,
         decode_timeout_seconds=1.0,
         gemini_api_key=None,
-        gemini_model="gemini-2.5-flash",
+        gemini_model="gemini-3.1-flash-lite",
         provider_timeout_seconds=0.1,
         cors_origins=("*",),
     )

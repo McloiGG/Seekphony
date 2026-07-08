@@ -8,7 +8,6 @@ PATH_ENV_KEYS = (
     "SEEKPHONY_REPO_ROOT",
     "SEEKPHONY_DATA_DIR",
     "SEEKPHONY_DATABASE_PATH",
-    "SEEKPHONY_UPLOAD_DIR",
 )
 
 
@@ -25,7 +24,6 @@ def test_service_env_file_loads_paths_relative_to_env_file(monkeypatch, tmp_path
                 "SEEKPHONY_REPO_ROOT=..",
                 "SEEKPHONY_DATA_DIR=../var",
                 "SEEKPHONY_DATABASE_PATH=../var/seekphony.sqlite3",
-                "SEEKPHONY_UPLOAD_DIR=../var/uploads",
             ]
         ),
         encoding="utf-8",
@@ -43,7 +41,6 @@ def test_service_env_file_loads_paths_relative_to_env_file(monkeypatch, tmp_path
     assert settings.repo_root == tmp_path.resolve()
     assert settings.data_dir == (tmp_path / "var").resolve()
     assert settings.database_path == (tmp_path / "var" / "seekphony.sqlite3").resolve()
-    assert settings.upload_dir == (tmp_path / "var" / "uploads").resolve()
     assert settings.database_kind == "sqlite"
 
 

@@ -1,6 +1,8 @@
 # Git and editor metadata
 .git
 .gitignore
+.agents/
+.local_data/
 .DS_Store
 Thumbs.db
 
@@ -50,9 +52,7 @@ pnpm-debug.log*
 # Local runtime data
 var/
 backend/var/
-data/uploads/
-data/tmp/
-data/cache/
+data/
 *.sqlite
 *.sqlite3
 *.db

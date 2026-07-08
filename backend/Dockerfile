@@ -5,8 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_LINK_MODE=copy \
     SEEKPHONY_REPO_ROOT=/app \
     SEEKPHONY_DATA_DIR=/app/var \
-    SEEKPHONY_DATABASE_PATH=/app/var/seekphony.sqlite3 \
-    SEEKPHONY_UPLOAD_DIR=/app/var/uploads
+    SEEKPHONY_DATABASE_PATH=/app/var/seekphony.sqlite3
 
 WORKDIR /app
 
@@ -23,8 +22,6 @@ COPY backend/src /app/backend/src
 WORKDIR /app/backend
 
 RUN uv sync --no-dev --frozen
-
-RUN mkdir -p /app/var/uploads
 
 EXPOSE 8000
 

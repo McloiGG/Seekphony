@@ -8,7 +8,7 @@ from seekphony_backend.core.errors import AppError
 from seekphony_backend.schemas import EvaluationListResponse, EvaluationResponse, HealthResponse
 
 if TYPE_CHECKING:
-    from seekphony_backend.main import AppServices
+    from seekphony_backend.application import AppServices
 
 
 def register_routes(app: FastAPI, services: AppServices) -> None:

@@ -6,10 +6,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SKIP_DIRS = {
     ".git",
+    ".agents",
+    ".local_data",
     ".mypy_cache",
     ".pytest_cache",
     ".ruff_cache",
     ".venv",
+    "data",
     "dist",
     "node_modules",
     "var",

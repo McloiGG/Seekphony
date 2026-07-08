@@ -219,6 +219,9 @@ __marimo__/
 
 # --- Project-specific ignores ---
 
+# Legacy/local agent scratch directories. Keep `.agent/` tracked for repo instructions.
+.agents/
+
 # Local secrets
 .env.*
 !.env.example
@@ -227,6 +230,7 @@ __marimo__/
 # Local runtime state
 var/
 backend/var/
+data/
 
 # OS/editor noise
 .DS_Store
@@ -243,18 +247,11 @@ frontend/dist/
 frontend/.vite/
 *.tsbuildinfo
 
-# Local uploaded/demo/generated data
-data/uploads/
-data/tmp/
-data/cache/
+# Local uploaded/demo/generated media
 *.webm
 *.wav
 *.mp3
 *.m4a
-
-# Allow committed demo/sample assets
-!data/samples/
-!data/samples/**
 
 # Local databases
 *.sqlite

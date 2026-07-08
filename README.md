@@ -62,7 +62,8 @@ Important backend variables:
 - `DATABASE_URL`: optional Postgres connection string for deployment. Leave empty
   for local SQLite.
 - `GEMINI_API_KEY` or `GOOGLE_API_KEY`: optional Gemini explanation key.
-- `SEEKPHONY_GEMINI_MODEL`: Gemini model name.
+- `SEEKPHONY_GEMINI_MODEL`: Gemini model name. Default:
+  `gemini-3.1-flash-lite`.
 - `SEEKPHONY_CORS_ORIGINS`: comma-separated allowed browser origins.
 - `SEEKPHONY_MAX_UPLOAD_BYTES`: per-file upload limit.
 - `SEEKPHONY_MIN_CLIP_SECONDS` and `SEEKPHONY_MAX_CLIP_SECONDS`: clip limits.

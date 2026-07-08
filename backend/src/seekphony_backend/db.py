@@ -119,7 +119,6 @@ class Database:
         return self.settings.database_kind == "postgres"
 
     def initialize(self) -> None:
-        self.settings.upload_dir.mkdir(parents=True, exist_ok=True)
         if self.is_postgres:
             with self.postgres_transaction() as conn, conn.cursor() as cursor:
                 cursor.execute(POSTGRES_SCHEMA)
