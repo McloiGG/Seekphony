@@ -244,7 +244,7 @@ class Database:
             row = cursor.fetchone()
         if row is None:
             raise RuntimeError("Database did not return an evaluation id.")
-            return int(row["id"] if isinstance(row, dict) else row[0])
+        return int(row["id"] if isinstance(row, dict) else row[0])
 
     @contextmanager
     def sqlite_transaction(self) -> Iterator[sqlite3.Connection]:
