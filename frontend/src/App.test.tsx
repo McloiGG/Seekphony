@@ -59,6 +59,7 @@ const evaluationPayload: EvaluationResponse = {
 describe("App", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    window.localStorage.clear();
     window.__SEEKPHONY_CONFIG__ = { apiBaseUrl: "http://localhost:8000" };
     vi.spyOn(window, "confirm").mockReturnValue(true);
   });
@@ -83,7 +84,7 @@ describe("App", () => {
     expect(screen.queryByText("Checking")).not.toBeInTheDocument();
     expect(screen.queryByText("Connected")).not.toBeInTheDocument();
     expect(screen.queryByText("Refresh Backend")).not.toBeInTheDocument();
-    expect(screen.getByText("Recent saved evaluations")).toBeInTheDocument();
+    expect(screen.getByText("Recent saved evaluations on this browser")).toBeInTheDocument();
     expect(screen.getByText("88%")).toBeInTheDocument();
   });
 
@@ -98,6 +99,7 @@ describe("App", () => {
   });
 
   it("submits uploaded reference and performance audio", async () => {
+    const evaluationDeviceHeaders: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith("/api/v1/health")) {
@@ -107,6 +109,10 @@ describe("App", () => {
         return jsonResponse({ status: "ok", evaluations: [] });
       }
       if (url.endsWith("/api/v1/evaluations") && init?.method === "POST") {
+        const deviceId = headerValue(init.headers, "X-Seekphony-Device-ID");
+        if (deviceId) {
+          evaluationDeviceHeaders.push(deviceId);
+        }
         return jsonResponse(evaluationPayload);
       }
       return jsonResponse({ status: "ok", evaluations: [] });
@@ -133,6 +139,8 @@ describe("App", () => {
     expect(screen.getByText("Performance clipped playback ready")).toBeInTheDocument();
     expect(screen.getByText("AI explanation unavailable")).toBeInTheDocument();
     expect(screen.getByText("Gemini API key is not configured.")).toBeInTheDocument();
+    expect(evaluationDeviceHeaders).toHaveLength(1);
+    expect(evaluationDeviceHeaders[0]).toBe(window.localStorage.getItem("seekphony_device_id"));
   });
 
   it("accepts dropped reference audio", async () => {
@@ -262,7 +270,7 @@ describe("App", () => {
     expect(screen.getByText("Evaluation deleted")).toBeInTheDocument();
   });
 
-  it("clears all saved evaluations", async () => {
+  it("clears saved evaluations for this browser", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith("/api/v1/health")) {
@@ -277,12 +285,16 @@ describe("App", () => {
     render(<App />);
 
     await screen.findByText("88%");
-    await userEvent.click(screen.getByRole("button", { name: /Clear all/i }));
+    await userEvent.click(screen.getByRole("button", { name: /Clear my history/i }));
 
-    await waitFor(() => expect(screen.getByText("History cleared")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Browser history cleared")).toBeInTheDocument());
     expect(screen.getByText("No evaluation records loaded yet.")).toBeInTheDocument();
   });
 });
+
+function headerValue(headers: HeadersInit | undefined, name: string): string | null {
+  return new Headers(headers).get(name);
+}
 
 function jsonResponse(payload: unknown): Promise<Response> {
   return Promise.resolve(

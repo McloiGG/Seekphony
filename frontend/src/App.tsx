@@ -449,7 +449,7 @@ export default function App() {
   }
 
   async function handleDeleteEvaluation(evaluationId: number) {
-    if (!window.confirm("Delete this saved evaluation?")) {
+    if (!window.confirm("Delete this saved evaluation from this browser history?")) {
       return;
     }
     try {
@@ -463,14 +463,18 @@ export default function App() {
   }
 
   async function handleClearEvaluations() {
-    if (!history.length || !window.confirm("Clear all saved evaluations?")) {
+    if (!history.length || !window.confirm("Clear saved evaluations for this browser only?")) {
       return;
     }
     try {
       await clearEvaluationRecords();
       setHistory([]);
       setSelectedHistory(null);
-      setNotice({ kind: "success", title: "History cleared", detail: "All saved results were removed." });
+      setNotice({
+        kind: "success",
+        title: "Browser history cleared",
+        detail: "Saved results for this browser were removed.",
+      });
     } catch (error) {
       setNotice(toNotice(error, "Clear history failed."));
     }
@@ -784,7 +788,7 @@ export default function App() {
         <div className="history-heading">
           <div className="section-heading">
             <p className="eyebrow">Evaluation data</p>
-            <h2 id="history-title">Recent saved evaluations</h2>
+            <h2 id="history-title">Recent saved evaluations on this browser</h2>
           </div>
           <button
             className="ghost-button compact danger"
@@ -793,7 +797,7 @@ export default function App() {
             onClick={() => void handleClearEvaluations()}
           >
             <Trash2 aria-hidden="true" size={16} />
-            Clear all
+            Clear my history
           </button>
         </div>
         <div className="history-grid">

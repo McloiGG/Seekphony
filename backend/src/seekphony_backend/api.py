@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import hmac
 import urllib.parse
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
-from fastapi import FastAPI, File, Form, Query, UploadFile
+from fastapi import FastAPI, File, Form, Header, Query, UploadFile
 from fastapi.responses import Response
 
 from seekphony_backend.core.errors import AppError
+from seekphony_backend.core.security import sha256_text
 from seekphony_backend.schemas import (
     DeleteResponse,
     EvaluationListResponse,
@@ -17,6 +20,10 @@ from seekphony_backend.schemas import (
 
 if TYPE_CHECKING:
     from seekphony_backend.application import AppServices
+
+
+DEVICE_ID_HEADER = "X-Seekphony-Device-ID"
+ADMIN_TOKEN_HEADER = "X-Seekphony-Admin-Token"
 
 
 def register_routes(app: FastAPI, services: AppServices) -> None:
@@ -56,7 +63,9 @@ def register_routes(app: FastAPI, services: AppServices) -> None:
         clip_start_seconds: float = Form(0.0),
         clip_duration_seconds: float = Form(30.0),
         performance_start_seconds: float | None = Form(None),
+        device_id: str | None = Header(default=None, alias=DEVICE_ID_HEADER),
     ) -> EvaluationResponse:
+        device_id_hash = _device_id_hash(device_id)
         _validate_clip_bounds(clip_start_seconds, clip_duration_seconds, services)
         reference_content = await reference.read()
         performance_content = await performance.read()
@@ -67,6 +76,7 @@ def register_routes(app: FastAPI, services: AppServices) -> None:
             services.settings.max_upload_bytes,
         )
         return await services.evaluations.create_evaluation(
+            device_id_hash=device_id_hash,
             reference_content=reference_content,
             reference_filename=_filename(reference),
             performance_content=performance_content,
@@ -96,20 +106,70 @@ def register_routes(app: FastAPI, services: AppServices) -> None:
     @app.get(f"{api_prefix}/evaluations", response_model=EvaluationListResponse)
     async def list_evaluations(
         limit: int = Query(default=20, ge=1, le=100),
+        device_id: str | None = Header(default=None, alias=DEVICE_ID_HEADER),
     ) -> EvaluationListResponse:
-        return services.evaluations.list_evaluations(limit)
+        return services.evaluations.list_evaluations(_device_id_hash(device_id), limit)
 
     @app.delete(f"{api_prefix}/evaluations", response_model=DeleteResponse)
-    async def clear_evaluations() -> DeleteResponse:
-        return services.evaluations.clear_evaluations()
+    async def clear_evaluations(
+        device_id: str | None = Header(default=None, alias=DEVICE_ID_HEADER),
+    ) -> DeleteResponse:
+        return services.evaluations.clear_evaluations(_device_id_hash(device_id))
+
+    @app.delete(f"{api_prefix}/admin/evaluations", response_model=DeleteResponse)
+    async def clear_all_evaluations(
+        admin_token: str | None = Header(default=None, alias=ADMIN_TOKEN_HEADER),
+    ) -> DeleteResponse:
+        _require_admin_token(admin_token, services)
+        return services.evaluations.clear_all_evaluations()
 
     @app.get(f"{api_prefix}/evaluations/{{evaluation_id}}", response_model=EvaluationResponse)
-    async def get_evaluation(evaluation_id: int) -> EvaluationResponse:
-        return services.evaluations.get_evaluation(evaluation_id)
+    async def get_evaluation(
+        evaluation_id: int,
+        device_id: str | None = Header(default=None, alias=DEVICE_ID_HEADER),
+    ) -> EvaluationResponse:
+        return services.evaluations.get_evaluation(evaluation_id, _device_id_hash(device_id))
 
     @app.delete(f"{api_prefix}/evaluations/{{evaluation_id}}", response_model=DeleteResponse)
-    async def delete_evaluation(evaluation_id: int) -> DeleteResponse:
-        return services.evaluations.delete_evaluation(evaluation_id)
+    async def delete_evaluation(
+        evaluation_id: int,
+        device_id: str | None = Header(default=None, alias=DEVICE_ID_HEADER),
+    ) -> DeleteResponse:
+        return services.evaluations.delete_evaluation(evaluation_id, _device_id_hash(device_id))
+
+
+def _device_id_hash(device_id: str | None) -> str:
+    if not device_id or not device_id.strip():
+        raise AppError(
+            422,
+            "validation_error",
+            f"{DEVICE_ID_HEADER} is required for evaluation history.",
+        )
+    try:
+        normalized = str(UUID(device_id.strip()))
+    except ValueError as exc:
+        raise AppError(
+            422,
+            "validation_error",
+            f"{DEVICE_ID_HEADER} must be a valid UUID.",
+        ) from exc
+    return sha256_text(normalized)
+
+
+def _require_admin_token(admin_token: str | None, services: AppServices) -> None:
+    expected = services.settings.admin_token
+    if not expected:
+        raise AppError(
+            403,
+            "admin_disabled",
+            "Admin evaluation cleanup is not configured.",
+        )
+    if not admin_token or not hmac.compare_digest(admin_token, expected):
+        raise AppError(
+            403,
+            "forbidden",
+            "Admin cleanup token is missing or invalid.",
+        )
 
 
 def _validate_clip_bounds(

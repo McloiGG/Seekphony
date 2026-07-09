@@ -71,6 +71,7 @@ class Settings:
     gemini_api_key: str | None
     gemini_model: str
     provider_timeout_seconds: float
+    admin_token: str | None
     cors_origins: tuple[str, ...]
 
     @property
@@ -104,5 +105,6 @@ def get_settings() -> Settings:
         gemini_api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"),
         gemini_model=os.getenv("SEEKPHONY_GEMINI_MODEL", "gemini-3.1-flash-lite"),
         provider_timeout_seconds=_float_env("SEEKPHONY_PROVIDER_TIMEOUT_SECONDS", 8.0),
+        admin_token=os.getenv("SEEKPHONY_ADMIN_TOKEN") or None,
         cors_origins=tuple(origin.strip() for origin in cors_raw.split(",") if origin.strip()),
     )

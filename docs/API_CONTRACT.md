@@ -2,6 +2,17 @@
 
 The canonical API prefix is `/api/v1`.
 
+Evaluation and history routes require an anonymous browser/device identifier:
+
+```http
+X-Seekphony-Device-ID: 11111111-1111-4111-8111-111111111111
+```
+
+The frontend generates this UUID in `localStorage`. The backend stores only a
+hash of it and filters saved evaluations by that hash. This is per-browser
+history separation, not authentication. Health and reference import routes do
+not require this header.
+
 All error responses use this shape:
 
 ```json
@@ -85,6 +96,8 @@ Accepts multipart form data:
   configured min/max.
 - `performance_start_seconds`: optional performance start offset, default `0`.
 
+Requires `X-Seekphony-Device-ID`.
+
 Response:
 
 ```json
@@ -134,7 +147,9 @@ not configured or fails, metric scoring still returns.
 
 `GET /api/v1/evaluations?limit=20`
 
-Returns recent saved evaluations:
+Requires `X-Seekphony-Device-ID`.
+
+Returns recent saved evaluations for the current browser/device:
 
 ```json
 {
@@ -147,8 +162,11 @@ Returns recent saved evaluations:
 
 `GET /api/v1/evaluations/{evaluation_id}`
 
+Requires `X-Seekphony-Device-ID`.
+
 Returns the same shape as create evaluation. Missing evaluations return HTTP 404
-with status `not_found`.
+with status `not_found`. Evaluations owned by another browser/device also return
+HTTP 404.
 
 Saved evaluations contain scores, metrics, warnings, weak segments, Gemini state,
 filenames, and clip settings. They do not contain replayable audio.
@@ -157,7 +175,9 @@ filenames, and clip settings. They do not contain replayable audio.
 
 `DELETE /api/v1/evaluations/{evaluation_id}`
 
-Deletes one saved metadata row:
+Requires `X-Seekphony-Device-ID`.
+
+Deletes one saved metadata row for the current browser/device:
 
 ```json
 {
@@ -166,13 +186,16 @@ Deletes one saved metadata row:
 }
 ```
 
-Missing evaluations return HTTP 404 with status `not_found`.
+Missing evaluations or evaluations owned by another browser/device return HTTP
+404 with status `not_found`.
 
-## Clear Evaluations
+## Clear Browser Evaluations
 
 `DELETE /api/v1/evaluations`
 
-Deletes all saved evaluation metadata rows:
+Requires `X-Seekphony-Device-ID`.
+
+Deletes all saved evaluation metadata rows for the current browser/device:
 
 ```json
 {
@@ -180,3 +203,26 @@ Deletes all saved evaluation metadata rows:
   "deleted_count": 3
 }
 ```
+
+## Admin Clear All Evaluations
+
+`DELETE /api/v1/admin/evaluations`
+
+Requires backend-only admin token:
+
+```http
+X-Seekphony-Admin-Token: <SEEKPHONY_ADMIN_TOKEN>
+```
+
+Deletes all saved evaluation metadata rows across all anonymous devices:
+
+```json
+{
+  "status": "ok",
+  "deleted_count": 12
+}
+```
+
+If `SEEKPHONY_ADMIN_TOKEN` is not configured, the route returns HTTP 403 with
+status `admin_disabled`. Missing or incorrect tokens return HTTP 403 with status
+`forbidden`. The frontend does not call this route.

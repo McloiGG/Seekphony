@@ -31,9 +31,10 @@ services, and returns structured JSON or imported audio bytes.
 
 ### Data Layer
 
-Stores evaluation records, file hashes, scores, metrics JSON, warning JSON,
-problem-segment JSON, and Gemini explanation metadata. SQLite is the default local
-database. `DATABASE_URL` switches deployment to Postgres.
+Stores evaluation records, anonymous device hashes, file hashes, scores, metrics
+JSON, warning JSON, problem-segment JSON, and Gemini explanation metadata.
+SQLite is the default local database. `DATABASE_URL` switches deployment to
+Postgres.
 
 Raw uploaded, imported, and recorded audio is not stored permanently in the MVP.
 
@@ -61,7 +62,8 @@ the backend returns deterministic metrics with `explanation.status` set to
 
 Docker Compose uses optional `env_file` entries plus explicit environment
 mappings. The frontend container uses runtime public config. The backend container
-installs `ffmpeg` and keeps runtime SQLite state under `/app/var`.
+installs `ffmpeg`, honors deployment-provided `PORT`, and keeps runtime SQLite
+state under `/app/var`.
 
 ## Boundary Rules
 
@@ -71,4 +73,7 @@ installs `ffmpeg` and keeps runtime SQLite state under `/app/var`.
 - Gemini must not receive raw audio.
 - URL import must not allow local, private, or reserved network targets.
 - Frontend environment variables are public and must not contain secrets.
-- Backend provider credentials and `DATABASE_URL` must be injected at runtime.
+- Backend provider credentials, `DATABASE_URL`, and admin cleanup tokens must be
+  injected at runtime.
+- Evaluation history routes must filter by the hashed anonymous device ID.
+- Global history cleanup must be admin-only and unavailable from browser code.

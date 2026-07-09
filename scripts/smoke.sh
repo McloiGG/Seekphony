@@ -2,6 +2,7 @@
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8000}"
+DEVICE_ID="${SEEKPHONY_SMOKE_DEVICE_ID:-00000000-0000-4000-8000-000000000001}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
@@ -70,6 +71,7 @@ PERFORMANCE_FILE="$(curl_file_path "$TMP_DIR/performance.wav")"
 
 curl -fsS "$BASE_URL/api/v1/health"
 curl -fsS \
+  -H "X-Seekphony-Device-ID: $DEVICE_ID" \
   -F "reference=@$REFERENCE_FILE;type=audio/wav" \
   -F "performance=@$PERFORMANCE_FILE;type=audio/wav" \
   -F "clip_start_seconds=0" \
