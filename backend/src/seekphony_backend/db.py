@@ -12,6 +12,7 @@ from seekphony_backend.core.config import Settings
 SQLITE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS evaluations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id_hash TEXT,
     created_at TEXT NOT NULL,
     reference_filename TEXT NOT NULL,
     performance_filename TEXT NOT NULL,
@@ -46,6 +47,7 @@ ON evaluations(created_at DESC);
 POSTGRES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS evaluations (
     id BIGSERIAL PRIMARY KEY,
+    device_id_hash TEXT,
     created_at TEXT NOT NULL,
     reference_filename TEXT NOT NULL,
     performance_filename TEXT NOT NULL,
@@ -78,6 +80,7 @@ ON evaluations(created_at DESC);
 """
 
 INSERT_COLUMNS = (
+    "device_id_hash",
     "created_at",
     "reference_filename",
     "performance_filename",
@@ -122,10 +125,12 @@ class Database:
         if self.is_postgres:
             with self.postgres_transaction() as conn, conn.cursor() as cursor:
                 cursor.execute(POSTGRES_SCHEMA)
+                _migrate_postgres(cursor)
             return
         self.settings.database_path.parent.mkdir(parents=True, exist_ok=True)
         with self.sqlite_transaction() as conn:
             conn.executescript(SQLITE_SCHEMA)
+            _migrate_sqlite(conn)
 
     def create_evaluation(self, data: dict[str, Any]) -> int:
         payload = _serialize_json_fields(data)
@@ -133,49 +138,80 @@ class Database:
             return self._create_postgres_evaluation(payload)
         return self._create_sqlite_evaluation(payload)
 
-    def get_evaluation(self, evaluation_id: int) -> dict[str, Any] | None:
+    def get_evaluation(self, evaluation_id: int, device_id_hash: str) -> dict[str, Any] | None:
         if self.is_postgres:
             with self.postgres_transaction() as conn, conn.cursor() as cursor:
-                cursor.execute("SELECT * FROM evaluations WHERE id = %s", (evaluation_id,))
+                cursor.execute(
+                    "SELECT * FROM evaluations WHERE id = %s AND device_id_hash = %s",
+                    (evaluation_id, device_id_hash),
+                )
                 row = cursor.fetchone()
             return _deserialize_row(row)
 
         with self.sqlite_transaction() as conn:
             row = conn.execute(
-                "SELECT * FROM evaluations WHERE id = ?",
-                (evaluation_id,),
+                "SELECT * FROM evaluations WHERE id = ? AND device_id_hash = ?",
+                (evaluation_id, device_id_hash),
             ).fetchone()
         return _deserialize_row(dict(row)) if row else None
 
-    def list_evaluations(self, limit: int = 20) -> list[dict[str, Any]]:
+    def list_evaluations(self, device_id_hash: str, limit: int = 20) -> list[dict[str, Any]]:
         safe_limit = max(1, min(limit, 100))
         if self.is_postgres:
             with self.postgres_transaction() as conn, conn.cursor() as cursor:
                 cursor.execute(
-                    "SELECT * FROM evaluations ORDER BY created_at DESC, id DESC LIMIT %s",
-                    (safe_limit,),
+                    (
+                        "SELECT * FROM evaluations WHERE device_id_hash = %s "
+                        "ORDER BY created_at DESC, id DESC LIMIT %s"
+                    ),
+                    (device_id_hash, safe_limit),
                 )
                 rows = cursor.fetchall()
             return [_deserialize_row(row) for row in rows if row is not None]
 
         with self.sqlite_transaction() as conn:
             rows = conn.execute(
-                "SELECT * FROM evaluations ORDER BY created_at DESC, id DESC LIMIT ?",
-                (safe_limit,),
+                (
+                    "SELECT * FROM evaluations WHERE device_id_hash = ? "
+                    "ORDER BY created_at DESC, id DESC LIMIT ?"
+                ),
+                (device_id_hash, safe_limit),
             ).fetchall()
         return [_deserialize_row(dict(row)) for row in rows]
 
-    def delete_evaluation(self, evaluation_id: int) -> bool:
+    def delete_evaluation(self, evaluation_id: int, device_id_hash: str) -> bool:
         if self.is_postgres:
             with self.postgres_transaction() as conn, conn.cursor() as cursor:
-                cursor.execute("DELETE FROM evaluations WHERE id = %s", (evaluation_id,))
+                cursor.execute(
+                    "DELETE FROM evaluations WHERE id = %s AND device_id_hash = %s",
+                    (evaluation_id, device_id_hash),
+                )
                 return cursor.rowcount > 0
 
         with self.sqlite_transaction() as conn:
-            cursor = conn.execute("DELETE FROM evaluations WHERE id = ?", (evaluation_id,))
+            cursor = conn.execute(
+                "DELETE FROM evaluations WHERE id = ? AND device_id_hash = ?",
+                (evaluation_id, device_id_hash),
+            )
             return cursor.rowcount > 0
 
-    def clear_evaluations(self) -> int:
+    def clear_evaluations(self, device_id_hash: str) -> int:
+        if self.is_postgres:
+            with self.postgres_transaction() as conn, conn.cursor() as cursor:
+                cursor.execute(
+                    "DELETE FROM evaluations WHERE device_id_hash = %s",
+                    (device_id_hash,),
+                )
+                return cursor.rowcount
+
+        with self.sqlite_transaction() as conn:
+            cursor = conn.execute(
+                "DELETE FROM evaluations WHERE device_id_hash = ?",
+                (device_id_hash,),
+            )
+            return cursor.rowcount
+
+    def clear_all_evaluations(self) -> int:
         if self.is_postgres:
             with self.postgres_transaction() as conn, conn.cursor() as cursor:
                 cursor.execute("DELETE FROM evaluations")
@@ -208,7 +244,7 @@ class Database:
             row = cursor.fetchone()
         if row is None:
             raise RuntimeError("Database did not return an evaluation id.")
-        return int(row["id"] if isinstance(row, dict) else row[0])
+            return int(row["id"] if isinstance(row, dict) else row[0])
 
     @contextmanager
     def sqlite_transaction(self) -> Iterator[sqlite3.Connection]:
@@ -242,6 +278,24 @@ class Database:
             raise
         finally:
             conn.close()
+
+
+def _migrate_sqlite(conn: sqlite3.Connection) -> None:
+    columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(evaluations)")}
+    if "device_id_hash" not in columns:
+        conn.execute("ALTER TABLE evaluations ADD COLUMN device_id_hash TEXT")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_evaluations_device_created_at "
+        "ON evaluations(device_id_hash, created_at DESC)"
+    )
+
+
+def _migrate_postgres(cursor: Any) -> None:
+    cursor.execute("ALTER TABLE evaluations ADD COLUMN IF NOT EXISTS device_id_hash TEXT")
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_evaluations_device_created_at "
+        "ON evaluations(device_id_hash, created_at DESC)"
+    )
 
 
 def _serialize_json_fields(data: dict[str, Any]) -> dict[str, Any]:

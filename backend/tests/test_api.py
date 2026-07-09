@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import ipaddress
 import math
+import sqlite3
 import wave
 from dataclasses import replace
 from pathlib import Path
@@ -12,12 +13,51 @@ from fastapi.testclient import TestClient
 
 from seekphony_backend.application import create_app
 from seekphony_backend.core.config import Settings
+from seekphony_backend.db import Database
 from seekphony_backend.services.reference_imports import ImportedReference, ReferenceImportService
+
+DEVICE_A = "11111111-1111-4111-8111-111111111111"
+DEVICE_B = "22222222-2222-4222-8222-222222222222"
+ADMIN_TOKEN = "test-admin-token"
+LEGACY_SQLITE_SCHEMA = """
+CREATE TABLE evaluations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    reference_filename TEXT NOT NULL,
+    performance_filename TEXT NOT NULL,
+    reference_sha256 TEXT NOT NULL,
+    performance_sha256 TEXT NOT NULL,
+    clip_start_seconds REAL NOT NULL,
+    clip_duration_seconds REAL NOT NULL,
+    performance_start_seconds REAL NOT NULL,
+    overall_score REAL NOT NULL,
+    pitch_score REAL NOT NULL,
+    rhythm_score REAL NOT NULL,
+    stability_score REAL NOT NULL,
+    coverage_score REAL NOT NULL,
+    audio_quality_score REAL NOT NULL,
+    key_shift_semitones INTEGER,
+    pitch_error_cents REAL,
+    timing_offset_ms REAL,
+    voiced_coverage REAL NOT NULL,
+    confidence REAL NOT NULL,
+    metrics_json TEXT NOT NULL,
+    segments_json TEXT NOT NULL,
+    warnings_json TEXT NOT NULL,
+    explanation_status TEXT NOT NULL,
+    explanation_error TEXT,
+    explanation_json TEXT
+);
+"""
 
 
 @pytest.fixture()
 def client(tmp_path: Path) -> TestClient:
-    settings = Settings(
+    return TestClient(create_app(make_settings(tmp_path)))
+
+
+def make_settings(tmp_path: Path, *, admin_token: str | None = ADMIN_TOKEN) -> Settings:
+    return Settings(
         app_name="Seekphony Test Backend",
         api_prefix="/api/v1",
         repo_root=Path(__file__).resolve().parents[2],
@@ -31,9 +71,9 @@ def client(tmp_path: Path) -> TestClient:
         gemini_api_key=None,
         gemini_model="gemini-3.1-flash-lite",
         provider_timeout_seconds=0.1,
+        admin_token=admin_token,
         cors_origins=("*",),
     )
-    return TestClient(create_app(settings))
 
 
 def test_health_reports_evaluator_runtime(client: TestClient) -> None:
@@ -112,8 +152,8 @@ def test_evaluation_history_endpoints(client: TestClient) -> None:
     response = post_evaluation(client, make_wav(440.0, 6.0), make_wav(440.0, 6.0))
     evaluation_id = response.json()["evaluation_id"]
 
-    listed = client.get("/api/v1/evaluations")
-    fetched = client.get(f"/api/v1/evaluations/{evaluation_id}")
+    listed = client.get("/api/v1/evaluations", headers=device_headers())
+    fetched = client.get(f"/api/v1/evaluations/{evaluation_id}", headers=device_headers())
 
     assert listed.status_code == 200
     assert listed.json()["evaluations"][0]["evaluation_id"] == evaluation_id
@@ -126,11 +166,11 @@ def test_evaluation_history_delete_and_clear(client: TestClient) -> None:
     second = post_evaluation(client, make_wav(440.0, 6.0), make_wav(493.883, 6.0))
     first_id = first.json()["evaluation_id"]
 
-    deleted = client.delete(f"/api/v1/evaluations/{first_id}")
-    missing = client.get(f"/api/v1/evaluations/{first_id}")
-    missing_delete = client.delete("/api/v1/evaluations/99999")
-    cleared = client.delete("/api/v1/evaluations")
-    listed = client.get("/api/v1/evaluations")
+    deleted = client.delete(f"/api/v1/evaluations/{first_id}", headers=device_headers())
+    missing = client.get(f"/api/v1/evaluations/{first_id}", headers=device_headers())
+    missing_delete = client.delete("/api/v1/evaluations/99999", headers=device_headers())
+    cleared = client.delete("/api/v1/evaluations", headers=device_headers())
+    listed = client.get("/api/v1/evaluations", headers=device_headers())
 
     assert second.status_code == 200
     assert deleted.status_code == 200
@@ -140,6 +180,115 @@ def test_evaluation_history_delete_and_clear(client: TestClient) -> None:
     assert cleared.status_code == 200
     assert cleared.json()["deleted_count"] == 1
     assert listed.json()["evaluations"] == []
+
+
+def test_evaluation_history_is_scoped_by_device(client: TestClient) -> None:
+    first = post_evaluation(
+        client,
+        make_wav(440.0, 6.0),
+        make_wav(440.0, 6.0),
+        device_id=DEVICE_A,
+    )
+    second = post_evaluation(
+        client,
+        make_wav(440.0, 6.0),
+        make_wav(493.883, 6.0),
+        device_id=DEVICE_B,
+    )
+    first_id = first.json()["evaluation_id"]
+    second_id = second.json()["evaluation_id"]
+
+    listed_a = client.get("/api/v1/evaluations", headers=device_headers(DEVICE_A))
+    listed_b = client.get("/api/v1/evaluations", headers=device_headers(DEVICE_B))
+    cross_get = client.get(f"/api/v1/evaluations/{first_id}", headers=device_headers(DEVICE_B))
+    cross_delete = client.delete(
+        f"/api/v1/evaluations/{first_id}",
+        headers=device_headers(DEVICE_B),
+    )
+    clear_b = client.delete("/api/v1/evaluations", headers=device_headers(DEVICE_B))
+    listed_a_after_clear = client.get("/api/v1/evaluations", headers=device_headers(DEVICE_A))
+    listed_b_after_clear = client.get("/api/v1/evaluations", headers=device_headers(DEVICE_B))
+
+    assert listed_a.json()["evaluations"][0]["evaluation_id"] == first_id
+    assert listed_b.json()["evaluations"][0]["evaluation_id"] == second_id
+    assert cross_get.status_code == 404
+    assert cross_delete.status_code == 404
+    assert clear_b.status_code == 200
+    assert clear_b.json()["deleted_count"] == 1
+    assert [item["evaluation_id"] for item in listed_a_after_clear.json()["evaluations"]] == [
+        first_id
+    ]
+    assert listed_b_after_clear.json()["evaluations"] == []
+
+
+def test_evaluation_history_requires_valid_device_header(client: TestClient) -> None:
+    missing = post_evaluation_without_device_header(
+        client,
+        make_wav(440.0, 6.0),
+        make_wav(440.0, 6.0),
+    )
+    invalid = client.get(
+        "/api/v1/evaluations",
+        headers={"X-Seekphony-Device-ID": "not-a-uuid"},
+    )
+
+    assert missing.status_code == 422
+    assert missing.json()["status"] == "validation_error"
+    assert invalid.status_code == 422
+    assert invalid.json()["status"] == "validation_error"
+
+
+def test_admin_global_clear_requires_token_and_clears_all_devices(client: TestClient) -> None:
+    post_evaluation(client, make_wav(440.0, 6.0), make_wav(440.0, 6.0), device_id=DEVICE_A)
+    post_evaluation(client, make_wav(440.0, 6.0), make_wav(493.883, 6.0), device_id=DEVICE_B)
+
+    missing = client.delete("/api/v1/admin/evaluations")
+    wrong = client.delete(
+        "/api/v1/admin/evaluations",
+        headers={"X-Seekphony-Admin-Token": "wrong"},
+    )
+    cleared = client.delete(
+        "/api/v1/admin/evaluations",
+        headers={"X-Seekphony-Admin-Token": ADMIN_TOKEN},
+    )
+    listed_a = client.get("/api/v1/evaluations", headers=device_headers(DEVICE_A))
+    listed_b = client.get("/api/v1/evaluations", headers=device_headers(DEVICE_B))
+
+    assert missing.status_code == 403
+    assert missing.json()["status"] == "forbidden"
+    assert wrong.status_code == 403
+    assert wrong.json()["status"] == "forbidden"
+    assert cleared.status_code == 200
+    assert cleared.json()["deleted_count"] == 2
+    assert listed_a.json()["evaluations"] == []
+    assert listed_b.json()["evaluations"] == []
+
+
+def test_admin_global_clear_can_be_disabled(tmp_path: Path) -> None:
+    disabled_client = TestClient(create_app(make_settings(tmp_path, admin_token=None)))
+
+    response = disabled_client.delete(
+        "/api/v1/admin/evaluations",
+        headers={"X-Seekphony-Admin-Token": ADMIN_TOKEN},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["status"] == "admin_disabled"
+
+
+def test_sqlite_migration_adds_device_hash_column(tmp_path: Path) -> None:
+    database_path = tmp_path / "seekphony.sqlite3"
+    with sqlite3.connect(database_path) as conn:
+        conn.executescript(LEGACY_SQLITE_SCHEMA)
+
+    Database(make_settings(tmp_path)).initialize()
+
+    with sqlite3.connect(database_path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(evaluations)")}
+        indexes = {row[1] for row in conn.execute("PRAGMA index_list(evaluations)")}
+
+    assert "device_id_hash" in columns
+    assert "idx_evaluations_device_created_at" in indexes
 
 
 def test_reference_import_endpoint_returns_direct_audio_blob(client: TestClient) -> None:
@@ -247,9 +396,11 @@ def post_evaluation(
     performance: bytes,
     *,
     clip_duration_seconds: float = 5.0,
+    device_id: str = DEVICE_A,
 ) -> object:
     return client.post(
         "/api/v1/evaluations",
+        headers=device_headers(device_id),
         data={
             "clip_start_seconds": "0",
             "clip_duration_seconds": str(clip_duration_seconds),
@@ -260,6 +411,29 @@ def post_evaluation(
             "performance": ("performance.wav", performance, "audio/wav"),
         },
     )
+
+
+def post_evaluation_without_device_header(
+    client: TestClient,
+    reference: bytes,
+    performance: bytes,
+) -> object:
+    return client.post(
+        "/api/v1/evaluations",
+        data={
+            "clip_start_seconds": "0",
+            "clip_duration_seconds": "5.0",
+            "performance_start_seconds": "0",
+        },
+        files={
+            "reference": ("reference.wav", reference, "audio/wav"),
+            "performance": ("performance.wav", performance, "audio/wav"),
+        },
+    )
+
+
+def device_headers(device_id: str = DEVICE_A) -> dict[str, str]:
+    return {"X-Seekphony-Device-ID": device_id}
 
 
 def public_resolver(_hostname: str) -> list[ipaddress.IPv4Address]:

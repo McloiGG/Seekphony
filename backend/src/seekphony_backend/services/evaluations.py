@@ -32,6 +32,7 @@ class EvaluationService:
     async def create_evaluation(
         self,
         *,
+        device_id_hash: str,
         reference_content: bytes,
         reference_filename: str,
         performance_content: bytes,
@@ -61,6 +62,7 @@ class EvaluationService:
         )
         created_at = utc_now_iso()
         row = {
+            "device_id_hash": device_id_hash,
             "created_at": created_at,
             "reference_filename": reference_filename,
             "performance_filename": performance_filename,
@@ -106,15 +108,15 @@ class EvaluationService:
             explanation=explanation,
         )
 
-    def list_evaluations(self, limit: int = 20) -> EvaluationListResponse:
-        rows = self.db.list_evaluations(limit)
+    def list_evaluations(self, device_id_hash: str, limit: int = 20) -> EvaluationListResponse:
+        rows = self.db.list_evaluations(device_id_hash, limit)
         return EvaluationListResponse(
             status="ok",
             evaluations=[_response_from_row(row) for row in rows],
         )
 
-    def get_evaluation(self, evaluation_id: int) -> EvaluationResponse:
-        row = self.db.get_evaluation(evaluation_id)
+    def get_evaluation(self, evaluation_id: int, device_id_hash: str) -> EvaluationResponse:
+        row = self.db.get_evaluation(evaluation_id, device_id_hash)
         if row is None:
             raise AppError(
                 404,
@@ -124,8 +126,8 @@ class EvaluationService:
             )
         return _response_from_row(row)
 
-    def delete_evaluation(self, evaluation_id: int) -> DeleteResponse:
-        if not self.db.delete_evaluation(evaluation_id):
+    def delete_evaluation(self, evaluation_id: int, device_id_hash: str) -> DeleteResponse:
+        if not self.db.delete_evaluation(evaluation_id, device_id_hash):
             raise AppError(
                 404,
                 "not_found",
@@ -134,8 +136,11 @@ class EvaluationService:
             )
         return DeleteResponse(status="ok", deleted_count=1)
 
-    def clear_evaluations(self) -> DeleteResponse:
-        return DeleteResponse(status="ok", deleted_count=self.db.clear_evaluations())
+    def clear_evaluations(self, device_id_hash: str) -> DeleteResponse:
+        return DeleteResponse(status="ok", deleted_count=self.db.clear_evaluations(device_id_hash))
+
+    def clear_all_evaluations(self) -> DeleteResponse:
+        return DeleteResponse(status="ok", deleted_count=self.db.clear_all_evaluations())
 
 
 def _response_from_row(row: dict[str, Any]) -> EvaluationResponse:
