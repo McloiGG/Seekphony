@@ -129,6 +129,8 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByText("Evaluation complete")).toBeInTheDocument());
     expect(screen.getByText("Reference playback ready")).toBeInTheDocument();
     expect(screen.getByText("Performance playback ready")).toBeInTheDocument();
+    expect(screen.getByText("Reference clipped playback ready")).toBeInTheDocument();
+    expect(screen.getByText("Performance clipped playback ready")).toBeInTheDocument();
     expect(screen.getByText("AI explanation unavailable")).toBeInTheDocument();
     expect(screen.getByText("Gemini API key is not configured.")).toBeInTheDocument();
   });
@@ -154,7 +156,7 @@ describe("App", () => {
     fireEvent.drop(dropZone!, { dataTransfer: { files: [file] } });
 
     expect(screen.getByText("Reference playback ready")).toBeInTheDocument();
-    expect(screen.getByText(/reference-drop.wav/)).toBeInTheDocument();
+    expect(screen.getAllByText(/reference-drop.wav/).length).toBeGreaterThan(0);
   });
 
   it("accepts dropped performance audio after switching to upload", async () => {
@@ -177,7 +179,7 @@ describe("App", () => {
     fireEvent.drop(dropZone!, { dataTransfer: { files: [file] } });
 
     expect(screen.getByText("Performance playback ready")).toBeInTheDocument();
-    expect(screen.getByText(/performance-drop.wav/)).toBeInTheDocument();
+    expect(screen.getAllByText(/performance-drop.wav/).length).toBeGreaterThan(0);
   });
 
   it("loads reference audio from the URL tab and enables playback", async () => {
