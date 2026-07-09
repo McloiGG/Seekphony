@@ -5,8 +5,11 @@ import ipaddress
 import math
 import sqlite3
 import wave
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -291,6 +294,28 @@ def test_sqlite_migration_adds_device_hash_column(tmp_path: Path) -> None:
     assert "idx_evaluations_device_created_at" in indexes
 
 
+def test_postgres_create_evaluation_returns_inserted_id(tmp_path: Path) -> None:
+    database = Database(
+        replace(
+            make_settings(tmp_path),
+            database_url="postgresql://seekphony:test@example.com:5432/seekphony",
+        )
+    )
+    cursor = FakePostgresCursor({"id": 42})
+
+    @contextmanager
+    def fake_postgres_transaction() -> Iterator[FakePostgresConnection]:
+        yield FakePostgresConnection(cursor)
+
+    database.postgres_transaction = fake_postgres_transaction  # type: ignore[method-assign]
+
+    evaluation_id = database.create_evaluation(evaluation_row())
+
+    assert evaluation_id == 42
+    assert cursor.executed_sql is not None
+    assert "RETURNING id" in cursor.executed_sql
+
+
 def test_reference_import_endpoint_returns_direct_audio_blob(client: TestClient) -> None:
     services = client.app.state.services
     services.reference_imports = ReferenceImportService(
@@ -438,6 +463,63 @@ def device_headers(device_id: str = DEVICE_A) -> dict[str, str]:
 
 def public_resolver(_hostname: str) -> list[ipaddress.IPv4Address]:
     return [ipaddress.ip_address("8.8.8.8")]
+
+
+def evaluation_row() -> dict[str, Any]:
+    return {
+        "device_id_hash": "device-hash",
+        "created_at": "2026-07-09T00:00:00+00:00",
+        "reference_filename": "reference.wav",
+        "performance_filename": "performance.wav",
+        "reference_sha256": "reference-sha",
+        "performance_sha256": "performance-sha",
+        "clip_start_seconds": 0.0,
+        "clip_duration_seconds": 5.0,
+        "performance_start_seconds": 0.0,
+        "overall_score": 90.0,
+        "pitch_score": 90.0,
+        "rhythm_score": 90.0,
+        "stability_score": 90.0,
+        "coverage_score": 90.0,
+        "audio_quality_score": 90.0,
+        "key_shift_semitones": 0,
+        "pitch_error_cents": 0.0,
+        "timing_offset_ms": 0.0,
+        "voiced_coverage": 0.9,
+        "confidence": 0.9,
+        "metrics_json": {"confidence": 0.9},
+        "segments_json": [],
+        "warnings_json": [],
+        "explanation_status": "unavailable",
+        "explanation_error": "Gemini API key is not configured.",
+        "explanation_json": None,
+    }
+
+
+class FakePostgresConnection:
+    def __init__(self, cursor: FakePostgresCursor) -> None:
+        self._cursor = cursor
+
+    def cursor(self) -> FakePostgresCursor:
+        return self._cursor
+
+
+class FakePostgresCursor:
+    def __init__(self, row: dict[str, int]) -> None:
+        self.row = row
+        self.executed_sql: str | None = None
+
+    def __enter__(self) -> FakePostgresCursor:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def execute(self, sql: str, _values: tuple[object, ...]) -> None:
+        self.executed_sql = sql
+
+    def fetchone(self) -> dict[str, int]:
+        return self.row
 
 
 def make_wav(frequency: float, duration_seconds: float, *, amplitude: float = 0.45) -> bytes:
