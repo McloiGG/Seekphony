@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import io
+import ipaddress
 import math
 import wave
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -10,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from seekphony_backend.application import create_app
 from seekphony_backend.core.config import Settings
+from seekphony_backend.services.reference_imports import ImportedReference, ReferenceImportService
 
 
 @pytest.fixture()
@@ -21,7 +24,7 @@ def client(tmp_path: Path) -> TestClient:
         data_dir=tmp_path,
         database_path=tmp_path / "seekphony.sqlite3",
         database_url=None,
-        max_upload_bytes=2 * 1024 * 1024,
+        max_upload_bytes=30 * 1024 * 1024,
         min_clip_seconds=5.0,
         max_clip_seconds=60.0,
         decode_timeout_seconds=1.0,
@@ -118,6 +121,126 @@ def test_evaluation_history_endpoints(client: TestClient) -> None:
     assert fetched.json()["evaluation_id"] == evaluation_id
 
 
+def test_evaluation_history_delete_and_clear(client: TestClient) -> None:
+    first = post_evaluation(client, make_wav(440.0, 6.0), make_wav(440.0, 6.0))
+    second = post_evaluation(client, make_wav(440.0, 6.0), make_wav(493.883, 6.0))
+    first_id = first.json()["evaluation_id"]
+
+    deleted = client.delete(f"/api/v1/evaluations/{first_id}")
+    missing = client.get(f"/api/v1/evaluations/{first_id}")
+    missing_delete = client.delete("/api/v1/evaluations/99999")
+    cleared = client.delete("/api/v1/evaluations")
+    listed = client.get("/api/v1/evaluations")
+
+    assert second.status_code == 200
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted_count"] == 1
+    assert missing.status_code == 404
+    assert missing_delete.status_code == 404
+    assert cleared.status_code == 200
+    assert cleared.json()["deleted_count"] == 1
+    assert listed.json()["evaluations"] == []
+
+
+def test_reference_import_endpoint_returns_direct_audio_blob(client: TestClient) -> None:
+    services = client.app.state.services
+    services.reference_imports = ReferenceImportService(
+        services.settings,
+        resolver=public_resolver,
+        direct_adapter=lambda _url: ImportedReference(
+            content=make_wav(440.0, 5.0),
+            filename="reference.wav",
+            media_type="audio/wav",
+            source_type="direct_url",
+            title="Reference",
+        ),
+    )
+
+    response = client.post(
+        "/api/v1/reference-audio/import",
+        json={"url": "https://example.com/reference.wav"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("audio/wav")
+    assert response.headers["x-seekphony-filename"] == "reference.wav"
+    assert response.headers["x-seekphony-source-type"] == "direct_url"
+    assert response.content.startswith(b"RIFF")
+
+
+def test_reference_import_endpoint_uses_youtube_adapter(client: TestClient) -> None:
+    calls: list[str] = []
+    services = client.app.state.services
+
+    def fake_youtube_import(url: str) -> ImportedReference:
+        calls.append(url)
+        return ImportedReference(
+            content=make_wav(330.0, 5.0),
+            filename="youtube-reference.m4a",
+            media_type="audio/mp4",
+            source_type="youtube",
+            title="YouTube Reference",
+        )
+
+    services.reference_imports = ReferenceImportService(
+        services.settings,
+        resolver=public_resolver,
+        youtube_adapter=fake_youtube_import,
+    )
+
+    response = client.post(
+        "/api/v1/reference-audio/import",
+        json={"url": "https://www.youtube.com/watch?v=abc123"},
+    )
+
+    assert response.status_code == 200
+    assert calls == ["https://www.youtube.com/watch?v=abc123"]
+    assert response.headers["x-seekphony-source-type"] == "youtube"
+    assert response.headers["x-seekphony-filename"] == "youtube-reference.m4a"
+
+
+def test_reference_import_rejects_invalid_and_private_urls(client: TestClient) -> None:
+    unsupported = client.post(
+        "/api/v1/reference-audio/import", json={"url": "ftp://example.com/a.wav"}
+    )
+    private = client.post(
+        "/api/v1/reference-audio/import",
+        json={"url": "http://127.0.0.1/a.wav"},
+    )
+    local = client.post(
+        "/api/v1/reference-audio/import",
+        json={"url": "https://localhost/a.wav"},
+    )
+
+    assert unsupported.status_code == 422
+    assert private.status_code == 422
+    assert local.status_code == 422
+
+
+def test_reference_import_rejects_oversize_adapter_result(client: TestClient) -> None:
+    services = client.app.state.services
+    limited_settings = replace(services.settings, max_upload_bytes=4)
+    services.reference_imports = ReferenceImportService(
+        limited_settings,
+        resolver=public_resolver,
+        direct_adapter=lambda _url: ImportedReference(
+            content=b"12345",
+            filename="too-large.wav",
+            media_type="audio/wav",
+            source_type="direct_url",
+            title="Too large",
+        ),
+    )
+
+    response = client.post(
+        "/api/v1/reference-audio/import",
+        json={"url": "https://example.com/too-large.wav"},
+    )
+
+    assert response.status_code == 413
+    assert response.json()["status"] == "file_too_large"
+
+
 def post_evaluation(
     client: TestClient,
     reference: bytes,
@@ -137,6 +260,10 @@ def post_evaluation(
             "performance": ("performance.wav", performance, "audio/wav"),
         },
     )
+
+
+def public_resolver(_hostname: str) -> list[ipaddress.IPv4Address]:
+    return [ipaddress.ip_address("8.8.8.8")]
 
 
 def make_wav(frequency: float, duration_seconds: float, *, amplitude: float = 0.45) -> bytes:

@@ -26,12 +26,21 @@ export class SeekphonyApiError extends Error {
 }
 
 export interface EvaluationPayload {
-  reference: File;
+  reference: Blob;
+  referenceFilename: string;
   performance: Blob;
   performanceFilename: string;
   clipStartSeconds: number;
   clipDurationSeconds: number;
   performanceStartSeconds: number;
+}
+
+export interface ImportedReferenceAudio {
+  blob: Blob;
+  filename: string;
+  sourceType: string;
+  title: string;
+  byteSize: number;
 }
 
 export async function fetchHealth(): Promise<HealthResponse> {
@@ -44,7 +53,7 @@ export async function fetchEvaluations(limit = 5): Promise<EvaluationListRespons
 
 export async function createEvaluation(payload: EvaluationPayload): Promise<EvaluationResponse> {
   const body = new FormData();
-  body.append("reference", payload.reference, payload.reference.name);
+  body.append("reference", payload.reference, payload.referenceFilename);
   body.append("performance", payload.performance, payload.performanceFilename);
   body.append("clip_start_seconds", String(payload.clipStartSeconds));
   body.append("clip_duration_seconds", String(payload.clipDurationSeconds));
@@ -53,6 +62,29 @@ export async function createEvaluation(payload: EvaluationPayload): Promise<Eval
     method: "POST",
     body,
   });
+}
+
+export async function importReferenceAudio(url: string): Promise<ImportedReferenceAudio> {
+  const response = await requestBlob("/api/v1/reference-audio/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  return {
+    blob: response.blob,
+    filename: decodeHeader(response.headers.get("X-Seekphony-Filename")) || "reference-audio",
+    sourceType: response.headers.get("X-Seekphony-Source-Type") || "direct_url",
+    title: decodeHeader(response.headers.get("X-Seekphony-Title")) || "Imported reference",
+    byteSize: Number(response.headers.get("X-Seekphony-Byte-Size") || response.blob.size),
+  };
+}
+
+export async function deleteEvaluationRecord(evaluationId: number): Promise<void> {
+  await requestJson(`/api/v1/evaluations/${evaluationId}`, { method: "DELETE" });
+}
+
+export async function clearEvaluationRecords(): Promise<void> {
+  await requestJson("/api/v1/evaluations", { method: "DELETE" });
 }
 
 async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -68,6 +100,41 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
       throw errorFromPayload(response.status, payload);
     }
     return payload as T;
+  } catch (error) {
+    if (error instanceof SeekphonyApiError) {
+      throw error;
+    }
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new SeekphonyApiError("Backend request timed out.", {
+        code: "timeout",
+        retryable: true,
+      });
+    }
+    throw new SeekphonyApiError("Backend service is unreachable.", {
+      code: "network_error",
+      retryable: true,
+    });
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+async function requestBlob(
+  path: string,
+  init: RequestInit = {},
+): Promise<{ blob: Blob; headers: Headers }> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${apiBaseUrl()}${path}`, {
+      ...init,
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const payload = await parseJson(response);
+      throw errorFromPayload(response.status, payload);
+    }
+    return { blob: await response.blob(), headers: response.headers };
   } catch (error) {
     if (error instanceof SeekphonyApiError) {
       throw error;
@@ -119,4 +186,15 @@ function isApiError(value: unknown): value is ApiErrorDetail {
   }
   const candidate = value as Partial<ApiErrorDetail>;
   return typeof candidate.status === "string" && typeof candidate.message === "string";
+}
+
+function decodeHeader(value: string | null): string {
+  if (!value) {
+    return "";
+  }
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }

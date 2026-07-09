@@ -15,7 +15,8 @@ All error responses use this shape:
 ```
 
 Important statuses include `validation_error`, `file_too_large`,
-`unsupported_audio`, `audio_decode_failed`, and `not_found`.
+`unsupported_audio`, `audio_decode_failed`, `reference_import_failed`, and
+`not_found`.
 
 ## Health
 
@@ -38,12 +39,37 @@ Returns service status, configured persistence mode, provider flags, and limits:
     "gemini_configured": false
   },
   "limits": {
-    "max_upload_bytes": 15728640,
+    "max_upload_bytes": 31457280,
     "min_clip_seconds": 5,
     "max_clip_seconds": 60
   }
 }
 ```
+
+## Import Reference Audio
+
+`POST /api/v1/reference-audio/import`
+
+Accepts JSON:
+
+```json
+{
+  "url": "https://example.com/reference.mp3"
+}
+```
+
+The backend imports direct audio URLs and best-effort YouTube links, validates
+HTTP(S) targets, rejects local/private/reserved hosts, enforces the configured
+30 MB limit, and returns the imported audio bytes without permanent storage.
+
+Response body is binary audio. Metadata is returned in exposed headers:
+
+- `X-Seekphony-Filename`
+- `X-Seekphony-Source-Type`: `direct_url` or `youtube`
+- `X-Seekphony-Title`
+- `X-Seekphony-Byte-Size`
+
+YouTube support depends on `yt-dlp` and is not guaranteed for every video.
 
 ## Create Evaluation
 
@@ -123,3 +149,34 @@ Returns recent saved evaluations:
 
 Returns the same shape as create evaluation. Missing evaluations return HTTP 404
 with status `not_found`.
+
+Saved evaluations contain scores, metrics, warnings, weak segments, Gemini state,
+filenames, and clip settings. They do not contain replayable audio.
+
+## Delete Evaluation
+
+`DELETE /api/v1/evaluations/{evaluation_id}`
+
+Deletes one saved metadata row:
+
+```json
+{
+  "status": "ok",
+  "deleted_count": 1
+}
+```
+
+Missing evaluations return HTTP 404 with status `not_found`.
+
+## Clear Evaluations
+
+`DELETE /api/v1/evaluations`
+
+Deletes all saved evaluation metadata rows:
+
+```json
+{
+  "status": "ok",
+  "deleted_count": 3
+}
+```

@@ -2,38 +2,43 @@ import {
   AlertTriangle,
   Clock3,
   Database,
-  FileAudio,
   Gauge,
+  Headphones,
+  Link2,
   Loader2,
   Mic,
   Music2,
-  RefreshCw,
+  PlayCircle,
   RotateCcw,
   Scissors,
   ShieldCheck,
-  Signal,
   Sparkles,
+  Trash2,
   Upload,
-  Waves,
+  X,
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties, DragEvent, ReactNode } from "react";
 
 import {
+  clearEvaluationRecords,
   createEvaluation,
+  deleteEvaluationRecord,
   fetchEvaluations,
   fetchHealth,
+  importReferenceAudio,
   SeekphonyApiError,
 } from "./api";
 import type { EvaluationResponse, HealthResponse, Metrics, ProblemSegment, Scores } from "./types";
 
-const DEFAULT_MAX_AUDIO_BYTES = 15 * 1024 * 1024;
+const DEFAULT_MAX_AUDIO_BYTES = 30 * 1024 * 1024;
 const DEFAULT_MIN_CLIP_SECONDS = 5;
 const DEFAULT_MAX_CLIP_SECONDS = 60;
-const DEFAULT_RECORD_SECONDS = 20;
 
-type BusyState = "idle" | "loading" | "recording";
+type BusyState = "idle" | "loading" | "recording" | "importing";
 type NoticeKind = "info" | "success" | "warning" | "danger";
+type ReferenceMode = "upload" | "url";
+type PerformanceMode = "upload" | "record";
 
 interface Notice {
   kind: NoticeKind;
@@ -41,32 +46,51 @@ interface Notice {
   detail: string;
 }
 
-interface RecordedAudio {
+interface SelectedAudio {
   blob: Blob;
   filename: string;
+  objectUrl: string | null;
+  duration: number | null;
+  title: string;
+  sourceLabel: string;
 }
 
 interface WavRecorder {
   stop: () => Promise<Blob>;
 }
 
+interface SourceTab<T extends string> {
+  value: T;
+  label: string;
+}
+
 export default function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [serviceOnline, setServiceOnline] = useState<boolean | null>(null);
   const [history, setHistory] = useState<EvaluationResponse[]>([]);
-  const [referenceFile, setReferenceFile] = useState<File | null>(null);
-  const [performanceFile, setPerformanceFile] = useState<File | null>(null);
-  const [recordedAudio, setRecordedAudio] = useState<RecordedAudio | null>(null);
-  const [referenceDuration, setReferenceDuration] = useState<number | null>(null);
-  const [clipStart, setClipStart] = useState(0);
-  const [clipDuration, setClipDuration] = useState(15);
+  const [referenceMode, setReferenceMode] = useState<ReferenceMode>("upload");
+  const [performanceMode, setPerformanceMode] = useState<PerformanceMode>("record");
+  const [referenceAudio, setReferenceAudio] = useState<SelectedAudio | null>(null);
+  const [performanceAudio, setPerformanceAudio] = useState<SelectedAudio | null>(null);
+  const [referenceUrl, setReferenceUrl] = useState("");
+  const [referenceStart, setReferenceStart] = useState(0);
   const [performanceStart, setPerformanceStart] = useState(0);
+  const [performanceEnd, setPerformanceEnd] = useState(DEFAULT_MAX_CLIP_SECONDS);
+  const [recordDuration, setRecordDuration] = useState(DEFAULT_MAX_CLIP_SECONDS);
+  const [recordDurationDraft, setRecordDurationDraft] = useState(
+    formatNumberInput(DEFAULT_MAX_CLIP_SECONDS),
+  );
+  const [recordElapsedSeconds, setRecordElapsedSeconds] = useState<number | null>(null);
+  const [recordRemainingSeconds, setRecordRemainingSeconds] = useState<number | null>(null);
   const [busy, setBusy] = useState<BusyState>("idle");
   const [notice, setNotice] = useState<Notice | null>(null);
   const [result, setResult] = useState<EvaluationResponse | null>(null);
-  const [recordingSeconds, setRecordingSeconds] = useState(DEFAULT_RECORD_SECONDS);
+  const [selectedHistory, setSelectedHistory] = useState<EvaluationResponse | null>(null);
   const recorderRef = useRef<WavRecorder | null>(null);
+  const recordingDurationRef = useRef(DEFAULT_MAX_CLIP_SECONDS);
   const timerRef = useRef<number | null>(null);
+  const referenceRef = useRef<SelectedAudio | null>(null);
+  const performanceRef = useRef<SelectedAudio | null>(null);
 
   const limits = {
     maxUploadBytes: health?.limits.max_upload_bytes ?? DEFAULT_MAX_AUDIO_BYTES,
@@ -74,6 +98,18 @@ export default function App() {
     maxClipSeconds: health?.limits.max_clip_seconds ?? DEFAULT_MAX_CLIP_SECONDS,
   };
 
+  const evaluationDuration = Math.max(0, performanceEnd - performanceStart);
+  const maxReferenceStart = Math.max(0, (referenceAudio?.duration ?? referenceStart) - evaluationDuration);
+  const performanceDuration = performanceAudio?.duration ?? null;
+  const maxPerformanceStart =
+    performanceDuration == null ? undefined : Math.max(0, performanceDuration - limits.minClipSeconds);
+  const maxPerformanceEnd = performanceDuration ?? undefined;
+  const performanceLimitMessage =
+    performanceDuration != null &&
+    (performanceStart > (maxPerformanceStart ?? performanceDuration) + 0.05 ||
+      performanceEnd > performanceDuration + 0.05)
+      ? `Performance trim must stay within ${formatSeconds(performanceDuration)}.`
+      : null;
   const loadRuntime = useCallback(async () => {
     try {
       const [healthResponse, evaluationsResponse] = await Promise.all([
@@ -82,6 +118,11 @@ export default function App() {
       ]);
       setHealth(healthResponse);
       setHistory(evaluationsResponse.evaluations);
+      setRecordDuration(healthResponse.limits.max_clip_seconds);
+      setRecordDurationDraft(formatNumberInput(healthResponse.limits.max_clip_seconds));
+      setPerformanceEnd((current) =>
+        clamp(current, healthResponse.limits.min_clip_seconds, healthResponse.limits.max_clip_seconds),
+      );
       setServiceOnline(true);
     } catch (error) {
       setServiceOnline(false);
@@ -95,44 +136,33 @@ export default function App() {
       if (timerRef.current) {
         window.clearInterval(timerRef.current);
       }
+      setRecordElapsedSeconds(null);
+      setRecordRemainingSeconds(null);
       void stopRecorder();
+      revokeAudio(referenceRef.current);
+      revokeAudio(performanceRef.current);
     };
   }, [loadRuntime]);
 
   useEffect(() => {
-    if (!referenceFile || typeof URL.createObjectURL !== "function") {
-      setReferenceDuration(null);
-      return undefined;
-    }
-    const objectUrl = URL.createObjectURL(referenceFile);
-    const audio = new Audio(objectUrl);
-    audio.onloadedmetadata = () => {
-      if (Number.isFinite(audio.duration)) {
-        setReferenceDuration(audio.duration);
-      }
-    };
-    audio.onerror = () => setReferenceDuration(null);
-    return () => URL.revokeObjectURL(objectUrl);
-  }, [referenceFile]);
+    referenceRef.current = referenceAudio;
+  }, [referenceAudio]);
 
-  const maxClipStart = Math.max(0, (referenceDuration ?? clipDuration) - clipDuration);
-  const performanceLabel = performanceFile?.name ?? recordedAudio?.filename ?? "Upload or record singing";
-  const serviceLabel = serviceOnline === null ? "Checking" : serviceOnline ? "Connected" : "Offline";
-  const serviceTone = serviceOnline === null ? "neutral" : serviceOnline ? "good" : "bad";
+  useEffect(() => {
+    performanceRef.current = performanceAudio;
+  }, [performanceAudio]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!referenceFile) {
+    if (!referenceAudio) {
       setNotice({
         kind: "warning",
         title: "Reference audio needed",
-        detail: "Upload the song or backing clip you want to compare against.",
+        detail: "Upload a reference file or load a direct audio URL or YouTube link.",
       });
       return;
     }
-    const performance = performanceFile ?? recordedAudio?.blob;
-    const performanceFilename = performanceFile?.name ?? recordedAudio?.filename;
-    if (!performance || !performanceFilename) {
+    if (!performanceAudio) {
       setNotice({
         kind: "warning",
         title: "Performance audio needed",
@@ -140,20 +170,9 @@ export default function App() {
       });
       return;
     }
-    if (referenceFile.size > limits.maxUploadBytes || performance.size > limits.maxUploadBytes) {
-      setNotice({
-        kind: "danger",
-        title: "Audio file too large",
-        detail: `Each upload must be under ${formatBytes(limits.maxUploadBytes)}.`,
-      });
-      return;
-    }
-    if (referenceDuration && clipStart + clipDuration > referenceDuration + 0.05) {
-      setNotice({
-        kind: "warning",
-        title: "Clip exceeds reference",
-        detail: "Move the clip start earlier or shorten the selected duration.",
-      });
+    const validation = validateWorkspace();
+    if (validation) {
+      setNotice(validation);
       return;
     }
 
@@ -161,11 +180,12 @@ export default function App() {
     setNotice({ kind: "info", title: "Evaluating performance", detail: "Backend is analyzing audio." });
     try {
       const response = await createEvaluation({
-        reference: referenceFile,
-        performance,
-        performanceFilename,
-        clipStartSeconds: clipStart,
-        clipDurationSeconds: clipDuration,
+        reference: referenceAudio.blob,
+        referenceFilename: referenceAudio.filename,
+        performance: performanceAudio.blob,
+        performanceFilename: performanceAudio.filename,
+        clipStartSeconds: referenceStart,
+        clipDurationSeconds: evaluationDuration,
         performanceStartSeconds: performanceStart,
       });
       setResult(response);
@@ -175,8 +195,7 @@ export default function App() {
         title: "Evaluation complete",
         detail: `Overall score: ${Math.round(response.scores.overall)}%.`,
       });
-      const evaluationsResponse = await fetchEvaluations(5);
-      setHistory(evaluationsResponse.evaluations);
+      await refreshHistory();
     } catch (error) {
       setServiceOnline(false);
       setNotice(toNotice(error, "Evaluation failed."));
@@ -185,9 +204,154 @@ export default function App() {
     }
   }
 
+  function validateWorkspace(): Notice | null {
+    if (referenceAudio && referenceAudio.blob.size > limits.maxUploadBytes) {
+      return {
+        kind: "danger",
+        title: "Reference audio is too large",
+        detail: `Reference audio must be under ${formatBytes(limits.maxUploadBytes)}.`,
+      };
+    }
+    if (performanceAudio && performanceAudio.blob.size > limits.maxUploadBytes) {
+      return {
+        kind: "danger",
+        title: "Performance audio is too large",
+        detail: `Performance audio must be under ${formatBytes(limits.maxUploadBytes)}.`,
+      };
+    }
+    if (evaluationDuration < limits.minClipSeconds || evaluationDuration > limits.maxClipSeconds) {
+      return {
+        kind: "warning",
+        title: "Clip duration outside limits",
+        detail: `Evaluation clips must be between ${formatSeconds(limits.minClipSeconds)} and ${formatSeconds(limits.maxClipSeconds)}.`,
+      };
+    }
+    if (performanceStart < 0 || performanceEnd <= performanceStart) {
+      return {
+        kind: "warning",
+        title: "Performance trim is invalid",
+        detail: "Performance end must be later than performance start.",
+      };
+    }
+    if (performanceAudio?.duration && performanceEnd > performanceAudio.duration + 0.05) {
+      return {
+        kind: "warning",
+        title: "Performance trim exceeds audio",
+        detail: "Move the performance end earlier or upload a longer take.",
+      };
+    }
+    if (referenceStart < 0) {
+      return {
+        kind: "warning",
+        title: "Reference start is invalid",
+        detail: "Reference start must be zero or greater.",
+      };
+    }
+    if (referenceAudio?.duration && referenceStart + evaluationDuration > referenceAudio.duration + 0.05) {
+      return {
+        kind: "warning",
+        title: "Reference clip exceeds audio",
+        detail: "Move the reference start earlier or choose a shorter performance duration.",
+      };
+    }
+    return null;
+  }
+
+  async function refreshHistory() {
+    const evaluationsResponse = await fetchEvaluations(5);
+    setHistory(evaluationsResponse.evaluations);
+  }
+
+  function replaceReferenceAudio(blob: Blob, filename: string, title: string, sourceLabel: string) {
+    const objectUrl = createObjectUrl(blob);
+    const audio: SelectedAudio = {
+      blob,
+      filename,
+      objectUrl,
+      duration: null,
+      title,
+      sourceLabel,
+    };
+    setReferenceStart(0);
+    setReferenceAudio((current) => {
+      revokeAudio(current);
+      return audio;
+    });
+    loadAudioDuration(objectUrl, (duration) => {
+      setReferenceAudio((current) =>
+        current?.objectUrl === objectUrl ? { ...current, duration } : current,
+      );
+    });
+  }
+
+  function replacePerformanceAudio(blob: Blob, filename: string, title: string, sourceLabel: string) {
+    const objectUrl = createObjectUrl(blob);
+    const audio: SelectedAudio = {
+      blob,
+      filename,
+      objectUrl,
+      duration: null,
+      title,
+      sourceLabel,
+    };
+    const fallbackDuration = clamp(recordDuration, limits.minClipSeconds, limits.maxClipSeconds);
+    setPerformanceStart(0);
+    setPerformanceEnd(fallbackDuration);
+    setPerformanceAudio((current) => {
+      revokeAudio(current);
+      return audio;
+    });
+    loadAudioDuration(objectUrl, (duration) => {
+      const defaultEnd = clamp(duration, limits.minClipSeconds, limits.maxClipSeconds);
+      setPerformanceEnd(defaultEnd);
+      setPerformanceAudio((current) =>
+        current?.objectUrl === objectUrl ? { ...current, duration } : current,
+      );
+    });
+  }
+
+  async function handleReferenceImport() {
+    if (!referenceUrl.trim()) {
+      setNotice({
+        kind: "warning",
+        title: "Reference URL needed",
+        detail: "Paste a direct audio URL or YouTube link first.",
+      });
+      return;
+    }
+    setBusy("importing");
+    setNotice({
+      kind: "info",
+      title: "Loading reference URL",
+      detail: "Backend is importing the audio so you can confirm it before evaluation.",
+    });
+    try {
+      const imported = await importReferenceAudio(referenceUrl);
+      replaceReferenceAudio(
+        imported.blob,
+        imported.filename,
+        imported.title,
+        imported.sourceType === "youtube" ? "YouTube import" : "URL import",
+      );
+      setNotice({
+        kind: "success",
+        title: "Reference loaded",
+        detail: `${imported.title} is ready for playback.`,
+      });
+    } catch (error) {
+      setNotice(toNotice(error, "Reference import failed."));
+    } finally {
+      setBusy("idle");
+    }
+  }
+
   async function toggleRecording() {
     if (busy === "recording") {
       await finishRecording();
+      return;
+    }
+    const duration = commitRecordDuration();
+    if (performanceAudio && !window.confirm("Recording again will replace the current performance audio.")) {
       return;
     }
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -200,11 +364,15 @@ export default function App() {
     }
     try {
       recorderRef.current = await startWavRecorder();
-      setPerformanceFile(null);
-      setRecordedAudio(null);
+      recordingDurationRef.current = duration;
       setBusy("recording");
-      setNotice({ kind: "info", title: "Recording", detail: "Sing the selected clip." });
-      startRecordingTimer();
+      setPerformanceMode("record");
+      setNotice({
+        kind: "info",
+        title: "Recording",
+        detail: "Watch the elapsed and remaining timers below.",
+      });
+      startRecordingTimer(duration);
     } catch {
       setBusy("idle");
       setNotice({
@@ -215,16 +383,19 @@ export default function App() {
     }
   }
 
-  function startRecordingTimer() {
-    setRecordingSeconds(DEFAULT_RECORD_SECONDS);
+  function startRecordingTimer(seconds: number) {
+    const startAt = Date.now();
+    const stopAt = startAt + seconds * 1000;
+    setRecordElapsedSeconds(0);
+    setRecordRemainingSeconds(Math.ceil(seconds));
     timerRef.current = window.setInterval(() => {
-      setRecordingSeconds((seconds) => {
-        if (seconds <= 1) {
-          void finishRecording();
-          return DEFAULT_RECORD_SECONDS;
-        }
-        return seconds - 1;
-      });
+      const elapsed = Math.min(seconds, Math.floor((Date.now() - startAt) / 1000));
+      const remaining = Math.max(0, Math.ceil((stopAt - Date.now()) / 1000));
+      setRecordElapsedSeconds(elapsed);
+      setRecordRemainingSeconds(remaining);
+      if (remaining <= 0) {
+        void finishRecording();
+      }
     }, 1000);
   }
 
@@ -233,17 +404,39 @@ export default function App() {
       window.clearInterval(timerRef.current);
       timerRef.current = null;
     }
+    setRecordElapsedSeconds(null);
+    setRecordRemainingSeconds(null);
     const blob = await stopRecorder();
     if (blob) {
-      setRecordedAudio({ blob, filename: "seekphony-performance.wav" });
+      replacePerformanceAudio(blob, "seekphony-performance.wav", "Recorded WAV take", "Recording");
+      setPerformanceEnd(clamp(recordingDurationRef.current, limits.minClipSeconds, limits.maxClipSeconds));
       setNotice({
         kind: "success",
         title: "Recording ready",
-        detail: "The WAV recording is ready for evaluation.",
+        detail: "The WAV recording is ready for playback and evaluation.",
       });
     }
     setBusy("idle");
-    setRecordingSeconds(DEFAULT_RECORD_SECONDS);
+  }
+
+  function updateRecordDurationDraft(value: string) {
+    setRecordDurationDraft(value);
+    const parsed = parseOptionalNumber(value);
+    if (
+      parsed != null &&
+      parsed >= limits.minClipSeconds &&
+      parsed <= limits.maxClipSeconds
+    ) {
+      setRecordDuration(parsed);
+    }
+  }
+
+  function commitRecordDuration(): number {
+    const parsed = parseOptionalNumber(recordDurationDraft);
+    const next = clamp(parsed ?? recordDuration, limits.minClipSeconds, limits.maxClipSeconds);
+    setRecordDuration(next);
+    setRecordDurationDraft(formatNumberInput(next));
+    return next;
   }
 
   async function stopRecorder(): Promise<Blob | null> {
@@ -255,14 +448,47 @@ export default function App() {
     return recorder.stop();
   }
 
+  async function handleDeleteEvaluation(evaluationId: number) {
+    if (!window.confirm("Delete this saved evaluation?")) {
+      return;
+    }
+    try {
+      await deleteEvaluationRecord(evaluationId);
+      setHistory((current) => current.filter((evaluation) => evaluation.evaluation_id !== evaluationId));
+      setSelectedHistory((current) => (current?.evaluation_id === evaluationId ? null : current));
+      setNotice({ kind: "success", title: "Evaluation deleted", detail: "Saved result was removed." });
+    } catch (error) {
+      setNotice(toNotice(error, "Delete failed."));
+    }
+  }
+
+  async function handleClearEvaluations() {
+    if (!history.length || !window.confirm("Clear all saved evaluations?")) {
+      return;
+    }
+    try {
+      await clearEvaluationRecords();
+      setHistory([]);
+      setSelectedHistory(null);
+      setNotice({ kind: "success", title: "History cleared", detail: "All saved results were removed." });
+    } catch (error) {
+      setNotice(toNotice(error, "Clear history failed."));
+    }
+  }
+
   function resetWorkspace() {
-    setReferenceFile(null);
-    setPerformanceFile(null);
-    setRecordedAudio(null);
-    setReferenceDuration(null);
-    setClipStart(0);
-    setClipDuration(15);
+    setReferenceAudio((current) => {
+      revokeAudio(current);
+      return null;
+    });
+    setPerformanceAudio((current) => {
+      revokeAudio(current);
+      return null;
+    });
+    setReferenceUrl("");
+    setReferenceStart(0);
     setPerformanceStart(0);
+    setPerformanceEnd(limits.maxClipSeconds);
     setResult(null);
     setNotice(null);
   }
@@ -275,35 +501,20 @@ export default function App() {
             <Music2 aria-hidden="true" size={28} />
             <span>Seekphony</span>
           </div>
-          <div className={`service-pill ${serviceTone}`}>
-            <Signal aria-hidden="true" size={16} />
-            <span>{serviceLabel}</span>
-          </div>
         </nav>
 
-        <div className="hero-grid">
-          <div className="hero-copy">
-            <p className="eyebrow">Explainable singing evaluator</p>
-            <h1 id="hero-title">Seekphony</h1>
-            <p className="hero-subtitle">
-              Compare your singing against a chosen song clip and get pitch, rhythm, stability,
-              coverage, audio-quality, and AI explanation signals in one workflow.
-            </p>
-            <div className="hero-actions">
-              <a className="primary-link" href="#evaluate">
-                <Mic aria-hidden="true" size={18} />
-                Start Evaluation
-              </a>
-              <button className="ghost-button" type="button" onClick={() => void loadRuntime()}>
-                <RefreshCw aria-hidden="true" size={18} />
-                Refresh Backend
-              </button>
-            </div>
-          </div>
-          <div className="wave-hero" aria-hidden="true">
-            {Array.from({ length: 32 }, (_, index) => (
-              <span key={index} style={{ "--i": index } as CSSProperties} />
-            ))}
+        <div className="hero-copy">
+          <p className="eyebrow">Explainable singing evaluator</p>
+          <h1 id="hero-title">Seekphony</h1>
+          <p className="hero-subtitle">
+            Compare your singing against a chosen song clip, then review pitch, rhythm,
+            stability, coverage, audio quality, and AI explanation signals.
+          </p>
+          <div className="hero-actions">
+            <a className="primary-link" href="#evaluate">
+              <Mic aria-hidden="true" size={18} />
+              Start Evaluation
+            </a>
           </div>
         </div>
       </section>
@@ -313,110 +524,231 @@ export default function App() {
           <form className="evaluate-panel" onSubmit={handleSubmit}>
             <div className="section-heading">
               <p className="eyebrow">Evaluation workspace</p>
-              <h2 id="evaluate-title">Upload, clip, sing, evaluate</h2>
+              <h2 id="evaluate-title">Choose audio, trim, evaluate</h2>
+              <p className="helper-copy">
+                Evaluation clips must be between {formatSeconds(limits.minClipSeconds)} and{" "}
+                {formatSeconds(limits.maxClipSeconds)}. Max file/import size:{" "}
+                {formatBytes(limits.maxUploadBytes)}.
+              </p>
             </div>
 
-            <div className="step-grid">
-              <FilePicker
-                id="reference-audio"
+            <div className="source-grid">
+              <SourcePanel
+                description="Use the original song, backing track, or reference clip."
                 icon={<Music2 aria-hidden="true" size={20} />}
-                label="Reference song audio"
-                detail={referenceFile?.name ?? "Upload a song or backing clip"}
-                onChange={(file) => {
-                  setReferenceFile(file);
-                  setClipStart(0);
-                }}
-              />
-              <FilePicker
-                id="performance-audio"
-                icon={<FileAudio aria-hidden="true" size={20} />}
-                label="Performance audio"
-                detail={performanceLabel}
-                onChange={(file) => {
-                  setPerformanceFile(file);
-                  setRecordedAudio(null);
-                }}
-              />
+                title="Reference audio"
+              >
+                <Tabs
+                  active={referenceMode}
+                  ariaLabel="Reference source"
+                  onChange={setReferenceMode}
+                  tabs={[
+                    { value: "upload", label: "Upload" },
+                    { value: "url", label: "URL" },
+                  ]}
+                />
+                <div className={`source-body ${referenceMode === "upload" ? "upload-mode" : "url-mode"}`}>
+                  {referenceMode === "upload" ? (
+                    <FilePicker
+                      id="reference-upload"
+                      label="Reference upload"
+                      onChange={(file) => {
+                        if (file) {
+                          replaceReferenceAudio(file, file.name, file.name, "Upload");
+                        }
+                      }}
+                    />
+                  ) : (
+                    <div className="url-import">
+                      <p>Paste a direct audio URL or YouTube link. YouTube import is best effort.</p>
+                      <label>
+                        <span>Reference URL</span>
+                        <input
+                          placeholder="https://..."
+                          type="url"
+                          value={referenceUrl}
+                          onChange={(event) => setReferenceUrl(event.target.value)}
+                        />
+                      </label>
+                      <button
+                        className="ghost-button compact"
+                        disabled={busy !== "idle"}
+                        type="button"
+                        onClick={() => void handleReferenceImport()}
+                      >
+                        {busy === "importing" ? (
+                          <Loader2 aria-hidden="true" size={16} />
+                        ) : (
+                          <Link2 aria-hidden="true" size={16} />
+                        )}
+                        Load URL
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <AudioPreview audio={referenceAudio} label="Reference playback" />
+              </SourcePanel>
+
+              <SourcePanel
+                description="Upload or record the singing you want scored."
+                icon={<Headphones aria-hidden="true" size={20} />}
+                title="Performance audio"
+              >
+                <Tabs
+                  active={performanceMode}
+                  ariaLabel="Performance source"
+                  onChange={setPerformanceMode}
+                  tabs={[
+                    { value: "record", label: "Record" },
+                    { value: "upload", label: "Upload" },
+                  ]}
+                />
+                <div
+                  className={`source-body ${
+                    performanceMode === "record" ? "record-mode" : "upload-mode"
+                  }`}
+                >
+                  {performanceMode === "record" ? (
+                    <div className="record-controls">
+                      <label>
+                        <span>Record duration</span>
+                        <input
+                          max={limits.maxClipSeconds}
+                          min={limits.minClipSeconds}
+                          step={1}
+                          type="number"
+                          value={recordDurationDraft}
+                          onBlur={() => commitRecordDuration()}
+                          onChange={(event) => updateRecordDurationDraft(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              commitRecordDuration();
+                            }
+                          }}
+                        />
+                      </label>
+                      <button
+                        className={busy === "recording" ? "record-button active" : "record-button"}
+                        disabled={busy === "loading" || busy === "importing"}
+                        type="button"
+                        onClick={() => void toggleRecording()}
+                      >
+                        <Mic aria-hidden="true" size={18} />
+                        {busy === "recording" ? "Stop recording" : "Record WAV take"}
+                      </button>
+                      {busy === "recording" &&
+                      recordElapsedSeconds != null &&
+                      recordRemainingSeconds != null ? (
+                        <div className="record-status" role="status">
+                          <div className="record-status-header">
+                            <span>Recording in progress</span>
+                            <small>Auto-stops when remaining hits 00:00</small>
+                          </div>
+                          <div className="record-timers">
+                            <div className="timer-card elapsed">
+                              <span>Elapsed</span>
+                              <strong>{formatTimer(recordElapsedSeconds)}</strong>
+                            </div>
+                            <div className="timer-card remaining">
+                              <span>Remaining</span>
+                              <strong>{formatTimer(recordRemainingSeconds)}</strong>
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <FilePicker
+                      id="performance-upload"
+                      label="Performance upload"
+                      onChange={(file) => {
+                        if (file) {
+                          replacePerformanceAudio(file, file.name, file.name, "Upload");
+                        }
+                      }}
+                    />
+                  )}
+                </div>
+                <AudioPreview audio={performanceAudio} label="Performance playback" />
+              </SourcePanel>
             </div>
 
-            <div className="clip-panel" aria-label="Clip settings">
+            <div className="clip-panel" aria-label="Audio trim settings">
               <div className="clip-title">
                 <Scissors aria-hidden="true" size={20} />
                 <div>
-                  <strong>Reference clip</strong>
-                  <span>
-                    {referenceDuration
-                      ? `Reference length: ${formatSeconds(referenceDuration)}`
-                      : "Backend will validate the selected window."}
-                  </span>
+                  <strong>Edit audio</strong>
+                  <span>Reference duration follows the selected performance window.</span>
                 </div>
               </div>
-              <label>
-                <span>Clip start seconds</span>
-                <input
-                  min={0}
-                  max={maxClipStart || undefined}
-                  step={0.5}
-                  type="number"
-                  value={clipStart}
-                  onChange={(event) => setClipStart(Number(event.target.value))}
-                />
-              </label>
-              <input
-                aria-label="Clip start slider"
-                disabled={!referenceDuration}
-                min={0}
-                max={maxClipStart}
-                step={0.5}
-                type="range"
-                value={Math.min(clipStart, maxClipStart)}
-                onChange={(event) => setClipStart(Number(event.target.value))}
-              />
-              <div className="clip-row">
-                <label>
-                  <span>Clip duration</span>
-                  <input
-                    min={limits.minClipSeconds}
-                    max={limits.maxClipSeconds}
-                    step={1}
-                    type="number"
-                    value={clipDuration}
-                    onChange={(event) => setClipDuration(Number(event.target.value))}
-                  />
-                </label>
-                <label>
-                  <span>Performance start</span>
-                  <input
-                    min={0}
-                    step={0.5}
-                    type="number"
-                    value={performanceStart}
-                    onChange={(event) => setPerformanceStart(Number(event.target.value))}
-                  />
-                </label>
-              </div>
-            </div>
 
-            <div className="record-panel">
-              <button
-                className={busy === "recording" ? "record-button active" : "record-button"}
-                disabled={busy === "loading"}
-                type="button"
-                onClick={() => void toggleRecording()}
-              >
-                <Mic aria-hidden="true" size={18} />
-                {busy === "recording" ? `Stop ${recordingSeconds}s` : "Record WAV Take"}
-              </button>
-              <span>
-                {recordedAudio ? "Recorded take ready." : "Use headphones for cleaner metrics."}
-              </span>
+              <div className="trim-grid">
+                <section className="trim-card">
+                  <h3>Reference</h3>
+                  <AudioScrub audio={referenceAudio} current={referenceStart} duration={evaluationDuration} />
+                  <label>
+                    <span>Start at</span>
+                    <input
+                      min={0}
+                      max={maxReferenceStart || undefined}
+                      step={0.5}
+                      type="number"
+                      value={referenceStart}
+                      onChange={(event) => setReferenceStart(Number(event.target.value))}
+                    />
+                  </label>
+                </section>
+
+                <section className="trim-card">
+                  <h3>Performance</h3>
+                  <AudioScrub
+                    audio={performanceAudio}
+                    current={performanceStart}
+                    duration={evaluationDuration}
+                  />
+                  <div className="clip-row">
+                    <label>
+                      <span>Start at</span>
+                      <input
+                        min={0}
+                        max={maxPerformanceStart}
+                        step={0.5}
+                        type="number"
+                        value={performanceStart}
+                        onChange={(event) => setPerformanceStart(Number(event.target.value))}
+                      />
+                    </label>
+                    <label>
+                      <span>End at</span>
+                      <input
+                        min={limits.minClipSeconds}
+                        max={maxPerformanceEnd}
+                        step={0.5}
+                        type="number"
+                        value={performanceEnd}
+                        onChange={(event) => setPerformanceEnd(Number(event.target.value))}
+                      />
+                    </label>
+                  </div>
+                  {performanceLimitMessage ? (
+                    <p className="field-tip warning" role="status">
+                      {performanceLimitMessage}
+                    </p>
+                  ) : null}
+                  <p className="duration-note">Selected duration: {formatSeconds(evaluationDuration)}</p>
+                </section>
+              </div>
             </div>
 
             {notice ? <NoticeBanner notice={notice} /> : null}
 
             <div className="panel-actions">
               <button className="primary-action" disabled={busy !== "idle"} type="submit">
-                {busy === "loading" ? <Loader2 aria-hidden="true" size={18} /> : <Gauge aria-hidden="true" size={18} />}
+                {busy === "loading" ? (
+                  <Loader2 aria-hidden="true" size={18} />
+                ) : (
+                  <Gauge aria-hidden="true" size={18} />
+                )}
                 Evaluate Singing
               </button>
               <button className="ghost-button compact" type="button" onClick={resetWorkspace}>
@@ -437,13 +769,31 @@ export default function App() {
       </section>
 
       <section className="history-band" aria-labelledby="history-title">
-        <div className="section-heading">
-          <p className="eyebrow">Evaluation data</p>
-          <h2 id="history-title">Recent saved evaluations</h2>
+        <div className="history-heading">
+          <div className="section-heading">
+            <p className="eyebrow">Evaluation data</p>
+            <h2 id="history-title">Recent saved evaluations</h2>
+          </div>
+          <button
+            className="ghost-button compact danger"
+            disabled={!history.length}
+            type="button"
+            onClick={() => void handleClearEvaluations()}
+          >
+            <Trash2 aria-hidden="true" size={16} />
+            Clear all
+          </button>
         </div>
         <div className="history-grid">
           {history.length ? (
-            history.map((evaluation) => <HistoryCard evaluation={evaluation} key={evaluation.evaluation_id} />)
+            history.map((evaluation) => (
+              <HistoryCard
+                evaluation={evaluation}
+                key={evaluation.evaluation_id}
+                onDelete={() => void handleDeleteEvaluation(evaluation.evaluation_id)}
+                onOpen={() => setSelectedHistory(evaluation)}
+              />
+            ))
           ) : (
             <div className="empty-history">
               <Database aria-hidden="true" size={24} />
@@ -452,31 +802,120 @@ export default function App() {
           )}
         </div>
       </section>
+
+      {selectedHistory ? (
+        <EvaluationDialog
+          evaluation={selectedHistory}
+          onClose={() => setSelectedHistory(null)}
+          onDelete={() => void handleDeleteEvaluation(selectedHistory.evaluation_id)}
+        />
+      ) : null}
     </main>
+  );
+}
+
+function SourcePanel({
+  children,
+  description,
+  icon,
+  title,
+}: {
+  children: ReactNode;
+  description: string;
+  icon: ReactNode;
+  title: string;
+}) {
+  return (
+    <section className="source-panel">
+      <div className="source-title">
+        {icon}
+        <div>
+          <h3>{title}</h3>
+          <p>{description}</p>
+        </div>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function Tabs<T extends string>({
+  active,
+  ariaLabel,
+  onChange,
+  tabs,
+}: {
+  active: T;
+  ariaLabel: string;
+  onChange: (value: T) => void;
+  tabs: SourceTab<T>[];
+}) {
+  return (
+    <div className="tab-list" aria-label={ariaLabel} role="tablist">
+      {tabs.map((tab) => (
+        <button
+          aria-selected={active === tab.value}
+          className={active === tab.value ? "active" : ""}
+          key={tab.value}
+          role="tab"
+          type="button"
+          onClick={() => onChange(tab.value)}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
 function FilePicker({
   id,
-  icon,
   label,
-  detail,
   onChange,
 }: {
   id: string;
-  icon: ReactNode;
   label: string;
-  detail: string;
   onChange: (file: File | null) => void;
 }) {
+  const [isDragging, setIsDragging] = useState(false);
+
+  function handleDrag(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+    setIsDragging(true);
+  }
+
+  function handleDragLeave(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      return;
+    }
+    setIsDragging(false);
+  }
+
+  function handleDrop(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragging(false);
+    onChange(event.dataTransfer.files?.[0] ?? null);
+  }
+
   return (
-    <label className="file-picker" htmlFor={id}>
-      {icon}
+    <label
+      className={isDragging ? "file-picker dragging" : "file-picker"}
+      htmlFor={id}
+      onDragEnter={handleDrag}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDrag}
+      onDrop={handleDrop}
+    >
+      <Upload aria-hidden="true" size={18} />
       <span>
         <strong>{label}</strong>
-        <small>{detail}</small>
+        <small>Drag and drop or browse audio/video files.</small>
       </span>
-      <Upload aria-hidden="true" size={18} />
       <input
         accept="audio/*,video/mp4,video/webm"
         id={id}
@@ -484,6 +923,53 @@ function FilePicker({
         onChange={(event) => onChange(event.target.files?.[0] ?? null)}
       />
     </label>
+  );
+}
+
+function AudioPreview({ audio, label }: { audio: SelectedAudio | null; label: string }) {
+  return (
+    <div className={audio ? "audio-preview ready" : "audio-preview empty"}>
+      <PlayCircle aria-hidden="true" size={18} />
+      <div>
+        <strong>{audio ? `${label} ready` : `${label} unavailable`}</strong>
+        <span>
+          {audio
+            ? `${audio.title} (${audio.sourceLabel}${audio.duration ? `, ${formatSeconds(audio.duration)}` : ""})`
+            : "Load audio to enable playback."}
+        </span>
+      </div>
+      <audio aria-label={label} controls src={audio?.objectUrl ?? undefined} />
+    </div>
+  );
+}
+
+function AudioScrub({
+  audio,
+  current,
+  duration,
+}: {
+  audio: SelectedAudio | null;
+  current: number;
+  duration: number;
+}) {
+  const total = audio?.duration ?? Math.max(duration, current + duration);
+  const startPercent = total > 0 ? Math.min(100, (current / total) * 100) : 0;
+  const widthPercent = total > 0 ? Math.min(100 - startPercent, (duration / total) * 100) : 0;
+  return (
+    <div className="audio-scrub">
+      <span>{formatSeconds(current)}</span>
+      <div className="scrub-track">
+        <i
+          style={
+            {
+              "--start": `${startPercent}%`,
+              "--width": `${widthPercent}%`,
+            } as CSSProperties
+          }
+        />
+      </div>
+      <span>{audio?.duration ? formatSeconds(audio.duration) : "duration unknown"}</span>
+    </div>
   );
 }
 
@@ -638,27 +1124,94 @@ function List({ label, items }: { label: string; items: string[] }) {
 function EmptyResult({ serviceOnline }: { serviceOnline: boolean | null }) {
   return (
     <div className="empty-result">
-      <Waves aria-hidden="true" size={30} />
+      <Sparkles aria-hidden="true" size={30} />
       <strong>{serviceOnline === false ? "Backend response unavailable" : "No evaluation yet"}</strong>
       <p>
         {serviceOnline === false
           ? "The interface still works. Reconnect the backend and retry."
-          : "Upload a reference clip and your singing to generate metrics."}
+          : "Load reference and performance audio to generate metrics."}
       </p>
     </div>
   );
 }
 
-function HistoryCard({ evaluation }: { evaluation: EvaluationResponse }) {
+function HistoryCard({
+  evaluation,
+  onDelete,
+  onOpen,
+}: {
+  evaluation: EvaluationResponse;
+  onDelete: () => void;
+  onOpen: () => void;
+}) {
   return (
     <article className="history-card">
-      <Clock3 aria-hidden="true" size={18} />
-      <div>
-        <strong>{Math.round(evaluation.scores.overall)}%</strong>
-        <span>{new Date(evaluation.created_at).toLocaleString()}</span>
-        <small>{evaluation.reference_filename}</small>
-      </div>
+      <button className="history-open" type="button" onClick={onOpen}>
+        <Clock3 aria-hidden="true" size={18} />
+        <span>
+          <strong>{Math.round(evaluation.scores.overall)}%</strong>
+          <small>{new Date(evaluation.created_at).toLocaleString()}</small>
+          <em>{evaluation.reference_filename}</em>
+        </span>
+      </button>
+      <button className="icon-button danger" aria-label="Delete saved evaluation" type="button" onClick={onDelete}>
+        <Trash2 aria-hidden="true" size={16} />
+      </button>
     </article>
+  );
+}
+
+function EvaluationDialog({
+  evaluation,
+  onClose,
+  onDelete,
+}: {
+  evaluation: EvaluationResponse;
+  onClose: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="modal-backdrop">
+      <section className="modal-panel" aria-labelledby="evaluation-detail-title" aria-modal="true" role="dialog">
+        <div className="modal-header">
+          <div>
+            <p className="eyebrow">Saved evaluation</p>
+            <h2 id="evaluation-detail-title">{Math.round(evaluation.scores.overall)}% overall</h2>
+          </div>
+          <button className="icon-button" aria-label="Close details" type="button" onClick={onClose}>
+            <X aria-hidden="true" size={18} />
+          </button>
+        </div>
+        <div className="detail-grid">
+          <div>
+            <span>Reference</span>
+            <strong>{evaluation.reference_filename}</strong>
+          </div>
+          <div>
+            <span>Performance</span>
+            <strong>{evaluation.performance_filename}</strong>
+          </div>
+          <div>
+            <span>Reference start</span>
+            <strong>{formatSeconds(evaluation.clip_start_seconds)}</strong>
+          </div>
+          <div>
+            <span>Duration</span>
+            <strong>{formatSeconds(evaluation.clip_duration_seconds)}</strong>
+          </div>
+        </div>
+        <EvaluationResult result={evaluation} />
+        <div className="modal-actions">
+          <button className="ghost-button compact danger" type="button" onClick={onDelete}>
+            <Trash2 aria-hidden="true" size={16} />
+            Delete
+          </button>
+          <button className="primary-action compact" type="button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -744,6 +1297,39 @@ function writeString(view: DataView, offset: number, value: string) {
   }
 }
 
+function createObjectUrl(blob: Blob): string | null {
+  if (typeof URL.createObjectURL !== "function") {
+    return null;
+  }
+  try {
+    return URL.createObjectURL(blob);
+  } catch {
+    return null;
+  }
+}
+
+function revokeAudio(audio: SelectedAudio | null) {
+  if (audio?.objectUrl && typeof URL.revokeObjectURL === "function") {
+    URL.revokeObjectURL(audio.objectUrl);
+  }
+}
+
+function loadAudioDuration(objectUrl: string | null, onDuration: (duration: number) => void) {
+  if (!objectUrl) {
+    return;
+  }
+  try {
+    const audio = new Audio(objectUrl);
+    audio.onloadedmetadata = () => {
+      if (Number.isFinite(audio.duration) && audio.duration > 0) {
+        onDuration(audio.duration);
+      }
+    };
+  } catch {
+    // Metadata probing is best-effort; backend validation remains authoritative.
+  }
+}
+
 function toNotice(error: unknown, fallbackTitle: string): Notice {
   if (error instanceof SeekphonyApiError) {
     return {
@@ -759,8 +1345,34 @@ function toNotice(error: unknown, fallbackTitle: string): Notice {
   };
 }
 
+function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+  return Math.min(max, Math.max(min, value));
+}
+
+function parseOptionalNumber(value: string): number | null {
+  if (!value.trim()) {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatNumberInput(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)));
+}
+
 function formatSeconds(value: number): string {
   return `${new Intl.NumberFormat("en", { maximumFractionDigits: 1 }).format(value)}s`;
+}
+
+function formatTimer(seconds: number): string {
+  const safeSeconds = Math.max(0, Math.ceil(seconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainder = safeSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
 }
 
 function formatBytes(value: number): string {

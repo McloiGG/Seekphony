@@ -13,6 +13,7 @@ from seekphony_backend.db import Database
 from seekphony_backend.services.audio import AudioEvaluator
 from seekphony_backend.services.evaluations import EvaluationService
 from seekphony_backend.services.explanations import GeminiExplanationService
+from seekphony_backend.services.reference_imports import ReferenceImportService
 
 
 @dataclass(slots=True)
@@ -21,6 +22,7 @@ class AppServices:
     db: Database
     audio: AudioEvaluator
     explanations: GeminiExplanationService
+    reference_imports: ReferenceImportService
     evaluations: EvaluationService
 
 
@@ -29,12 +31,14 @@ def create_services(settings: Settings) -> AppServices:
     db.initialize()
     audio = AudioEvaluator(settings.decode_timeout_seconds)
     explanations = GeminiExplanationService(settings)
+    reference_imports = ReferenceImportService(settings)
     evaluations = EvaluationService(db=db, audio=audio, explanations=explanations)
     return AppServices(
         settings=settings,
         db=db,
         audio=audio,
         explanations=explanations,
+        reference_imports=reference_imports,
         evaluations=evaluations,
     )
 
@@ -56,6 +60,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=[
+            "X-Seekphony-Filename",
+            "X-Seekphony-Source-Type",
+            "X-Seekphony-Title",
+            "X-Seekphony-Byte-Size",
+        ],
     )
     register_routes(app, services)
     return app

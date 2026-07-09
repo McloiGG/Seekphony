@@ -2,10 +2,46 @@
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8000}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-python - "$TMP_DIR" <<'PY'
+export UV_CACHE_DIR="${UV_CACHE_DIR:-${TMPDIR:-/tmp}/seekphony-uv-cache}"
+
+PYTHON_CMD=(python)
+if ! command -v python >/dev/null 2>&1; then
+  UV_BIN="${UV_BIN:-uv}"
+  if ! command -v "$UV_BIN" >/dev/null 2>&1; then
+    echo "python or uv is required but neither was found on PATH." >&2
+    exit 1
+  fi
+
+  UV_BACKEND_DIR="$REPO_ROOT/backend"
+  if command -v cygpath >/dev/null 2>&1; then
+    UV_BACKEND_DIR="$(cygpath -w "$UV_BACKEND_DIR")"
+  elif [[ "$UV_BACKEND_DIR" == /mnt/[A-Za-z]/* ]]; then
+    DRIVE="${UV_BACKEND_DIR:5:1}"
+    REST="${UV_BACKEND_DIR:7}"
+    UV_BACKEND_DIR="${DRIVE^^}:\\${REST//\//\\}"
+  fi
+  PYTHON_CMD=("$UV_BIN" run --project "$UV_BACKEND_DIR" python)
+fi
+
+curl_file_path() {
+  local path="$1"
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -m "$path"
+  elif [[ "$path" == /mnt/[A-Za-z]/* ]]; then
+    local drive="${path:5:1}"
+    local rest="${path:7}"
+    printf '%s:/%s' "${drive^^}" "$rest"
+  else
+    printf '%s' "$path"
+  fi
+}
+
+"${PYTHON_CMD[@]}" - "$TMP_DIR" <<'PY'
 from __future__ import annotations
 
 import math
@@ -29,10 +65,13 @@ for filename, frequency in (("reference.wav", 440.0), ("performance.wav", 440.0)
         writer.writeframes(bytes(frames))
 PY
 
-curl -fsS "$BASE_URL/health"
+REFERENCE_FILE="$(curl_file_path "$TMP_DIR/reference.wav")"
+PERFORMANCE_FILE="$(curl_file_path "$TMP_DIR/performance.wav")"
+
+curl -fsS "$BASE_URL/api/v1/health"
 curl -fsS \
-  -F "reference=@$TMP_DIR/reference.wav;type=audio/wav" \
-  -F "performance=@$TMP_DIR/performance.wav;type=audio/wav" \
+  -F "reference=@$REFERENCE_FILE;type=audio/wav" \
+  -F "performance=@$PERFORMANCE_FILE;type=audio/wav" \
   -F "clip_start_seconds=0" \
   -F "clip_duration_seconds=5" \
   -F "performance_start_seconds=0" \

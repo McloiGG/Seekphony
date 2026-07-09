@@ -97,7 +97,7 @@ def get_settings() -> Settings:
             "SEEKPHONY_DATABASE_PATH", data_dir / "seekphony.sqlite3", env_file_dir
         ),
         database_url=os.getenv("DATABASE_URL") or None,
-        max_upload_bytes=_int_env("SEEKPHONY_MAX_UPLOAD_BYTES", 15 * 1024 * 1024),
+        max_upload_bytes=_int_env("SEEKPHONY_MAX_UPLOAD_BYTES", 30 * 1024 * 1024),
         min_clip_seconds=_float_env("SEEKPHONY_MIN_CLIP_SECONDS", 5.0),
         max_clip_seconds=_float_env("SEEKPHONY_MAX_CLIP_SECONDS", 60.0),
         decode_timeout_seconds=_float_env("SEEKPHONY_DECODE_TIMEOUT_SECONDS", 15.0),

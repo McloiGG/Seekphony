@@ -65,7 +65,8 @@ Important backend variables:
 - `SEEKPHONY_GEMINI_MODEL`: Gemini model name. Default:
   `gemini-3.1-flash-lite`.
 - `SEEKPHONY_CORS_ORIGINS`: comma-separated allowed browser origins.
-- `SEEKPHONY_MAX_UPLOAD_BYTES`: per-file upload limit.
+- `SEEKPHONY_MAX_UPLOAD_BYTES`: per-file upload/import limit. Default is
+  `31457280` bytes / `30 MB`.
 - `SEEKPHONY_MIN_CLIP_SECONDS` and `SEEKPHONY_MAX_CLIP_SECONDS`: clip limits.
 
 Public frontend variables:
@@ -207,20 +208,27 @@ scripts/smoke.sh
 ## Key API Routes
 
 - `GET /api/v1/health`
+- `POST /api/v1/reference-audio/import`
 - `POST /api/v1/evaluations`
 - `GET /api/v1/evaluations`
 - `GET /api/v1/evaluations/{evaluation_id}`
+- `DELETE /api/v1/evaluations/{evaluation_id}`
+- `DELETE /api/v1/evaluations`
 
 ## Features
 
-- Upload a reference song or backing clip.
-- Select a 5-60 second reference window.
-- Upload singing audio or record a browser WAV take.
+- Upload a reference song or backing clip, or import one from a direct audio URL
+  or best-effort YouTube link.
+- Play loaded reference and performance audio before evaluation.
+- Select a 5-60 second performance window; the reference clip uses the same
+  duration from the chosen reference start.
+- Upload singing audio or record a browser WAV take with an overwrite warning.
 - Compare pitch, rhythm, stability, coverage, and audio quality.
 - Detect likely key shift and report it instead of treating every transposition as
   a full failure.
 - Show warnings for low-confidence, quiet, clipped, or low-voicing audio.
-- Persist structured evaluation history.
+- Persist structured evaluation history, inspect saved result details, and delete
+  one or all saved metadata records.
 - Display Gemini explanation when configured; show explicit unavailable/error
   state otherwise.
 
@@ -229,6 +237,8 @@ scripts/smoke.sh
 - WAV-first deterministic scoring avoids large audio ML dependencies and Python
   3.14 compatibility risk.
 - `ffmpeg` is installed in the backend Docker image for broader upload decoding.
+- `yt-dlp==2026.7.4` powers best-effort YouTube reference import. Direct uploads
+  and direct audio URLs remain the more reliable MVP path.
 - Gemini is used for explanation only, not metric calculation.
 - Raw audio is processed transiently and not stored permanently.
 - SQLite is the local default; `DATABASE_URL` switches deployment to Postgres.
@@ -240,6 +250,10 @@ scripts/smoke.sh
 - Scoring is a reference-match estimate, not a universal singing-quality grade.
 - No lyrics or pronunciation scoring in the MVP.
 - No auth, user accounts, permanent audio storage, or analytics dashboard yet.
+- Saved evaluation history does not replay old audio because raw audio is not
+  stored permanently.
+- YouTube import is best effort and may fail when the provider blocks extraction
+  or hosted resources are too limited.
 - Non-WAV local native runs require `ffmpeg` on PATH.
 - Render free resources may be slow for long clips, so the backend enforces short
   clip limits.

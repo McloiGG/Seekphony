@@ -6,6 +6,7 @@ from typing import Any
 from seekphony_backend.core.errors import AppError
 from seekphony_backend.db import Database, utc_now_iso
 from seekphony_backend.schemas import (
+    DeleteResponse,
     EvaluationListResponse,
     EvaluationResponse,
     Explanation,
@@ -122,6 +123,19 @@ class EvaluationService:
                 {"evaluation_id": evaluation_id},
             )
         return _response_from_row(row)
+
+    def delete_evaluation(self, evaluation_id: int) -> DeleteResponse:
+        if not self.db.delete_evaluation(evaluation_id):
+            raise AppError(
+                404,
+                "not_found",
+                "Evaluation was not found.",
+                {"evaluation_id": evaluation_id},
+            )
+        return DeleteResponse(status="ok", deleted_count=1)
+
+    def clear_evaluations(self) -> DeleteResponse:
+        return DeleteResponse(status="ok", deleted_count=self.db.clear_evaluations())
 
 
 def _response_from_row(row: dict[str, Any]) -> EvaluationResponse:

@@ -165,6 +165,26 @@ class Database:
             ).fetchall()
         return [_deserialize_row(dict(row)) for row in rows]
 
+    def delete_evaluation(self, evaluation_id: int) -> bool:
+        if self.is_postgres:
+            with self.postgres_transaction() as conn, conn.cursor() as cursor:
+                cursor.execute("DELETE FROM evaluations WHERE id = %s", (evaluation_id,))
+                return cursor.rowcount > 0
+
+        with self.sqlite_transaction() as conn:
+            cursor = conn.execute("DELETE FROM evaluations WHERE id = ?", (evaluation_id,))
+            return cursor.rowcount > 0
+
+    def clear_evaluations(self) -> int:
+        if self.is_postgres:
+            with self.postgres_transaction() as conn, conn.cursor() as cursor:
+                cursor.execute("DELETE FROM evaluations")
+                return cursor.rowcount
+
+        with self.sqlite_transaction() as conn:
+            cursor = conn.execute("DELETE FROM evaluations")
+            return cursor.rowcount
+
     def _create_sqlite_evaluation(self, payload: dict[str, Any]) -> int:
         placeholders = ", ".join("?" for _ in INSERT_COLUMNS)
         columns = ", ".join(INSERT_COLUMNS)

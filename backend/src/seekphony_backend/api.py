@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import urllib.parse
 from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, File, Form, Query, UploadFile
+from fastapi.responses import Response
 
 from seekphony_backend.core.errors import AppError
-from seekphony_backend.schemas import EvaluationListResponse, EvaluationResponse, HealthResponse
+from seekphony_backend.schemas import (
+    DeleteResponse,
+    EvaluationListResponse,
+    EvaluationResponse,
+    HealthResponse,
+    ReferenceImportRequest,
+)
 
 if TYPE_CHECKING:
     from seekphony_backend.application import AppServices
@@ -70,15 +78,38 @@ def register_routes(app: FastAPI, services: AppServices) -> None:
             ),
         )
 
+    @app.post(f"{api_prefix}/reference-audio/import")
+    async def import_reference_audio(request: ReferenceImportRequest) -> Response:
+        imported = await services.reference_imports.import_url(request.url)
+        return Response(
+            content=imported.content,
+            media_type=imported.media_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{_header_quote(imported.filename)}"',
+                "X-Seekphony-Filename": _header_quote(imported.filename),
+                "X-Seekphony-Source-Type": imported.source_type,
+                "X-Seekphony-Title": _header_quote(imported.title),
+                "X-Seekphony-Byte-Size": str(imported.byte_size),
+            },
+        )
+
     @app.get(f"{api_prefix}/evaluations", response_model=EvaluationListResponse)
     async def list_evaluations(
         limit: int = Query(default=20, ge=1, le=100),
     ) -> EvaluationListResponse:
         return services.evaluations.list_evaluations(limit)
 
+    @app.delete(f"{api_prefix}/evaluations", response_model=DeleteResponse)
+    async def clear_evaluations() -> DeleteResponse:
+        return services.evaluations.clear_evaluations()
+
     @app.get(f"{api_prefix}/evaluations/{{evaluation_id}}", response_model=EvaluationResponse)
     async def get_evaluation(evaluation_id: int) -> EvaluationResponse:
         return services.evaluations.get_evaluation(evaluation_id)
+
+    @app.delete(f"{api_prefix}/evaluations/{{evaluation_id}}", response_model=DeleteResponse)
+    async def delete_evaluation(evaluation_id: int) -> DeleteResponse:
+        return services.evaluations.delete_evaluation(evaluation_id)
 
 
 def _validate_clip_bounds(
@@ -118,3 +149,7 @@ def _validate_upload(content: bytes, filename: str | None, max_bytes: int) -> No
 
 def _filename(upload: UploadFile) -> str:
     return upload.filename or "uploaded-audio.wav"
+
+
+def _header_quote(value: str) -> str:
+    return urllib.parse.quote(value, safe="._- ")

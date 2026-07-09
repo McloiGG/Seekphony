@@ -69,6 +69,11 @@ class EvaluationListResponse(BaseModel):
     evaluations: list[EvaluationResponse]
 
 
+class DeleteResponse(BaseModel):
+    status: Literal["ok"]
+    deleted_count: int = Field(ge=0)
+
+
 class HealthResponse(BaseModel):
     status: Literal["ok"]
     service: str
@@ -76,3 +81,7 @@ class HealthResponse(BaseModel):
     database: dict[str, Any]
     providers: dict[str, bool]
     limits: dict[str, float | int]
+
+
+class ReferenceImportRequest(BaseModel):
+    url: str = Field(min_length=8, max_length=2048)
