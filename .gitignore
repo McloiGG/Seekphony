@@ -219,8 +219,7 @@ __marimo__/
 
 # --- Project-specific ignores ---
 
-# Local agent scratch/planning paths.
-.agent/
+# Legacy/local agent scratch paths. Keep `.agent/` tracked for repo instructions.
 .agents
 .agents/
 
