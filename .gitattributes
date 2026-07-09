@@ -1,0 +1,6 @@
+* text=auto
+
+# Shell scripts run inside Linux containers and must keep LF endings on Windows.
+*.sh text eol=lf
+frontend/docker-entrypoint.sh text eol=lf
+
