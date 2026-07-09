@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from typing import Any
 
@@ -41,7 +42,8 @@ class EvaluationService:
         clip_duration_seconds: float,
         performance_start_seconds: float,
     ) -> EvaluationResponse:
-        analysis = self.audio.evaluate(
+        analysis = await asyncio.to_thread(
+            self.audio.evaluate,
             reference_content,
             reference_filename,
             performance_content,
