@@ -19,9 +19,14 @@ def main() -> int:
         return 0
 
     failures = []
+    validated = 0
     for sha in commits:
+        if _is_merge_commit(sha):
+            continue
+
         message = _git(["log", "-1", "--format=%B", sha])
         subject = message.splitlines()[0] if message else ""
+        validated += 1
         if not PATTERN.fullmatch(subject):
             failures.append((sha[:12], subject))
 
@@ -30,7 +35,7 @@ def main() -> int:
             print(f"ERROR: commit {sha} is not Conventional Commits v1.0.0: {subject}")
         return 1
 
-    print(f"Validated {len(commits)} conventional commit message(s).")
+    print(f"Validated {validated} conventional commit message(s).")
     return 0
 
 
@@ -52,6 +57,11 @@ def _commits_to_check() -> list[str]:
 def _rev_list(commit_range: str) -> list[str]:
     output = _git(["rev-list", "--reverse", commit_range], required=False)
     return [line for line in output.splitlines() if line]
+
+
+def _is_merge_commit(sha: str) -> bool:
+    output = _git(["rev-list", "--parents", "-n", "1", sha], required=False)
+    return len(output.split()) > 2
 
 
 def _git(args: list[str], *, required: bool = True) -> str:

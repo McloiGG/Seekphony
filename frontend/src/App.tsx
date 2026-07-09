@@ -18,7 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import type { CSSProperties, DragEvent, ReactNode } from "react";
+import type { CSSProperties, DragEvent, ReactNode, SyntheticEvent } from "react";
 
 import {
   clearEvaluationRecords,
@@ -686,6 +686,12 @@ export default function App() {
                 <section className="trim-card">
                   <h3>Reference</h3>
                   <AudioScrub audio={referenceAudio} current={referenceStart} duration={evaluationDuration} />
+                  <ClipPlayback
+                    audio={referenceAudio}
+                    durationSeconds={evaluationDuration}
+                    label="Reference clipped playback"
+                    startSeconds={referenceStart}
+                  />
                   <label>
                     <span>Start at</span>
                     <input
@@ -705,6 +711,12 @@ export default function App() {
                     audio={performanceAudio}
                     current={performanceStart}
                     duration={evaluationDuration}
+                  />
+                  <ClipPlayback
+                    audio={performanceAudio}
+                    durationSeconds={evaluationDuration}
+                    label="Performance clipped playback"
+                    startSeconds={performanceStart}
                   />
                   <div className="clip-row">
                     <label>
@@ -939,6 +951,92 @@ function AudioPreview({ audio, label }: { audio: SelectedAudio | null; label: st
         </span>
       </div>
       <audio aria-label={label} controls src={audio?.objectUrl ?? undefined} />
+    </div>
+  );
+}
+
+function ClipPlayback({
+  audio,
+  durationSeconds,
+  label,
+  startSeconds,
+}: {
+  audio: SelectedAudio | null;
+  durationSeconds: number;
+  label: string;
+  startSeconds: number;
+}) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const safeStart = Math.max(0, Number.isFinite(startSeconds) ? startSeconds : 0);
+  const safeDuration = Math.max(0, Number.isFinite(durationSeconds) ? durationSeconds : 0);
+  const unclampedEnd = safeStart + safeDuration;
+  const safeEnd =
+    audio?.duration != null ? Math.max(safeStart, Math.min(unclampedEnd, audio.duration)) : unclampedEnd;
+  const hasPlayableClip = Boolean(audio && safeDuration > 0 && safeEnd > safeStart);
+
+  useEffect(() => {
+    const element = audioRef.current;
+    if (!element || !hasPlayableClip) {
+      return;
+    }
+    seekToClipStart(element, safeStart);
+  }, [audio?.objectUrl, hasPlayableClip, safeStart]);
+
+  function handlePlay(event: SyntheticEvent<HTMLAudioElement>) {
+    const element = event.currentTarget;
+    if (!hasPlayableClip) {
+      element.pause();
+      return;
+    }
+    if (element.currentTime < safeStart || element.currentTime >= safeEnd) {
+      seekToClipStart(element, safeStart);
+    }
+  }
+
+  function handleTimeUpdate(event: SyntheticEvent<HTMLAudioElement>) {
+    const element = event.currentTarget;
+    if (!hasPlayableClip) {
+      element.pause();
+      return;
+    }
+    if (element.currentTime < safeStart - 0.15) {
+      seekToClipStart(element, safeStart);
+      return;
+    }
+    if (element.currentTime >= safeEnd) {
+      element.pause();
+      seekToClipStart(element, safeStart);
+    }
+  }
+
+  return (
+    <div className={audio ? "clip-player ready" : "clip-player empty"}>
+      <div className="clip-player-header">
+        <PlayCircle aria-hidden="true" size={18} />
+        <div>
+          <strong>{audio ? `${label} ready` : `${label} unavailable`}</strong>
+          <span>
+            {audio
+              ? hasPlayableClip
+                ? `Selected ${formatSeconds(safeStart)} - ${formatSeconds(safeEnd)} from ${audio.title}.`
+                : "Adjust trim points to create a playable clip."
+              : "Load audio to enable clipped playback."}
+          </span>
+        </div>
+      </div>
+      <audio
+        ref={audioRef}
+        aria-label={label}
+        controls
+        src={audio?.objectUrl ?? undefined}
+        onLoadedMetadata={(event) => {
+          if (hasPlayableClip) {
+            seekToClipStart(event.currentTarget, safeStart);
+          }
+        }}
+        onPlay={handlePlay}
+        onTimeUpdate={handleTimeUpdate}
+      />
     </div>
   );
 }
@@ -1311,6 +1409,14 @@ function createObjectUrl(blob: Blob): string | null {
 function revokeAudio(audio: SelectedAudio | null) {
   if (audio?.objectUrl && typeof URL.revokeObjectURL === "function") {
     URL.revokeObjectURL(audio.objectUrl);
+  }
+}
+
+function seekToClipStart(element: HTMLAudioElement, startSeconds: number) {
+  try {
+    element.currentTime = startSeconds;
+  } catch {
+    // Some browsers reject seeking until metadata is ready; loadedmetadata retries it.
   }
 }
 
