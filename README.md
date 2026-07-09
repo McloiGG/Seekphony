@@ -53,7 +53,7 @@ Tracked examples are safe placeholders:
 
 - Root `.env.example`: Docker Compose configuration.
 - `backend/.env.example`: direct backend and backend Docker configuration.
-- `Frontend/.env.example`: frontend local and frontend Docker public config.
+- `frontend/.env.example`: frontend local and frontend Docker public config.
 
 Local `.env` files are ignored by Git. Do not commit real keys.
 
@@ -111,7 +111,7 @@ uv run uvicorn seekphony_backend.main:app --reload
 Frontend:
 
 ```bash
-cd Frontend
+cd frontend
 cp .env.example .env.local
 npm ci
 npm run dev
@@ -132,9 +132,9 @@ docker run --rm --env-file backend/.env --mount source=seekphony-backend-data,ta
 Frontend image:
 
 ```bash
-cp Frontend/.env.example Frontend/.env
-docker build -f Frontend/Dockerfile -t seekphony-frontend .
-docker run --rm --env-file Frontend/.env -p 5173:80 seekphony-frontend
+cp frontend/.env.example frontend/.env
+docker build -f frontend/Dockerfile -t seekphony-frontend .
+docker run --rm --env-file frontend/.env -p 5173:80 seekphony-frontend
 ```
 
 For direct frontend Docker runs, set `SEEKPHONY_PUBLIC_API_BASE_URL` to the backend
@@ -160,7 +160,7 @@ Secrets: Render environment variables only
    - `SEEKPHONY_CORS_ORIGINS=*` for first smoke test
 4. Verify backend health:
    - `https://your-render-service.onrender.com/api/v1/health`
-5. Create a Vercel project with root directory `Frontend`.
+5. Create a Vercel project with root directory `frontend`.
 6. Configure Vercel:
    - Build command: `npm run build`
    - Output directory: `dist`
@@ -191,7 +191,7 @@ uv run pytest
 Frontend-only:
 
 ```bash
-cd Frontend
+cd frontend
 npm ci
 npm run lint
 npm run typecheck

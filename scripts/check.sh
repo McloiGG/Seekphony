@@ -36,7 +36,7 @@ cd "$REPO_ROOT/backend"
 "$UV_BIN" run ruff check . ../scripts
 "$UV_BIN" run pytest
 
-cd "$REPO_ROOT/Frontend"
+cd "$REPO_ROOT/frontend"
 
 npm ci
 npm run lint

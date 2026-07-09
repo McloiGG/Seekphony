@@ -15,7 +15,7 @@ Reference upload or URL import + performance recording/upload + clip selection
 
 ### Frontend
 
-React + TypeScript SPA in `Frontend/`. Handles reference upload or URL import,
+React + TypeScript SPA in `frontend/`. Handles reference upload or URL import,
 playback confirmation, clip controls, WAV microphone recording, performance
 upload, readable backend-unavailable states, evaluation submission, score
 display, warnings, weak segments, AI explanation state, and saved evaluation

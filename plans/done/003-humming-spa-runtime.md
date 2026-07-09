@@ -29,7 +29,7 @@ still see a usable interface with readable error states.
 ## Context and Orientation
 
 The repository currently has a backend foundation, a Bootstrap static prototype in
-`Frontend/`, and runtime docs that say frontend files are not implemented. A partner
+`frontend/`, and runtime docs that say frontend files are not implemented. A partner
 pull introduced route-level ACRCloud code in `backend/src/seekphony_backend/api.py`,
 including hardcoded credentials and route behavior that no longer matches tests or
 `docs/API_CONTRACT.md`.
@@ -59,7 +59,7 @@ variables. Add deterministic confidence analysis to search responses so the fron
 can visualize results without inventing data.
 
 Then replace the static frontend prototype with a React + TypeScript + Vite SPA in
-the existing `Frontend/` folder. The UI will use a dark, centered, music-recognition
+the existing `frontend/` folder. The UI will use a dark, centered, music-recognition
 hero inspired by SongFinder, plus an in-page detection workspace with text search,
 audio upload, microphone recording, catalog summary, analytics summary, result
 states, candidates, and confidence scoring.
@@ -87,7 +87,7 @@ local Vite env or container public config -> frontend API client -> backend URL 
 - `backend/tests/`
 - `backend/pyproject.toml`
 - `backend/uv.lock`
-- `Frontend/`
+- `frontend/`
 - `docker-compose.yml`
 - `.env.example`
 - `.dockerignore`
@@ -140,7 +140,7 @@ Run and record:
 Docker checks when Docker is available:
 
 - `docker build -f backend/Dockerfile -t seekphony-backend .`
-- `docker build -f Frontend/Dockerfile -t seekphony-frontend .`
+- `docker build -f frontend/Dockerfile -t seekphony-frontend .`
 - `docker compose up --build`
 - frontend remains reachable when backend is stopped
 
@@ -197,7 +197,7 @@ Acceptance criteria:
 ## Decision Log
 
 - Decision:
-  Keep the existing `Frontend/` directory name.
+  Keep the existing frontend directory name.
   Rationale:
   Avoids Windows case-only rename churn and preserves existing repository structure.
   Date/Author:

@@ -29,7 +29,7 @@ services:
   frontend:
     build:
       context: .
-      dockerfile: Frontend/Dockerfile
+      dockerfile: frontend/Dockerfile
     env_file:
       - path: .env
         required: false
