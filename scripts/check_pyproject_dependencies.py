@@ -14,6 +14,7 @@ EXPECTED_RUNTIME = {
     "psycopg-binary",
     "python-multipart",
     "uvicorn",
+    "yt-dlp",
 }
 EXPECTED_DEV = {"pytest", "ruff"}
 
