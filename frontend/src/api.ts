@@ -7,6 +7,7 @@ import type {
 } from "./types";
 
 const REQUEST_TIMEOUT_MS = 60000;
+const EVALUATION_TIMEOUT_MS = 240000;
 const DEVICE_ID_STORAGE_KEY = "seekphony_device_id";
 const DEVICE_ID_HEADER = "X-Seekphony-Device-ID";
 
@@ -65,11 +66,15 @@ export async function createEvaluation(payload: EvaluationPayload): Promise<Eval
   body.append("clip_start_seconds", String(payload.clipStartSeconds));
   body.append("clip_duration_seconds", String(payload.clipDurationSeconds));
   body.append("performance_start_seconds", String(payload.performanceStartSeconds));
-  return requestJson<EvaluationResponse>("/api/v1/evaluations", {
-    method: "POST",
-    headers: deviceHeaders(),
-    body,
-  });
+  return requestJson<EvaluationResponse>(
+    "/api/v1/evaluations",
+    {
+      method: "POST",
+      headers: deviceHeaders(),
+      body,
+    },
+    EVALUATION_TIMEOUT_MS,
+  );
 }
 
 export async function importReferenceAudio(url: string): Promise<ImportedReferenceAudio> {
@@ -95,9 +100,13 @@ export async function clearEvaluationRecords(): Promise<void> {
   await requestJson("/api/v1/evaluations", withDeviceHeader({ method: "DELETE" }));
 }
 
-async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function requestJson<T>(
+  path: string,
+  init: RequestInit = {},
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<T> {
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(`${apiBaseUrl()}${path}`, {
       ...init,
