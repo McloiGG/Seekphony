@@ -97,7 +97,7 @@ class ReferenceImportService:
     async def import_url(self, raw_url: str) -> ImportedReference:
         parsed = validate_public_http_url(raw_url, self.resolver)
         if is_youtube_url(parsed):
-            return await asyncio.to_thread(self._import_youtube, raw_url)
+            return await asyncio.to_thread(self._import_youtube, normalize_youtube_url(parsed))
         return await asyncio.to_thread(self._import_direct, raw_url)
 
     def _import_direct(self, raw_url: str) -> ImportedReference:
@@ -171,6 +171,36 @@ def validate_public_http_url(
 def is_youtube_url(parsed: urllib.parse.ParseResult) -> bool:
     hostname = (parsed.hostname or "").lower().rstrip(".")
     return hostname in YOUTUBE_HOSTS or hostname.endswith(".youtube.com")
+
+
+def normalize_youtube_url(parsed: urllib.parse.ParseResult) -> str:
+    video_id = _youtube_video_id(parsed)
+    if not video_id:
+        return parsed.geturl()
+    return f"https://www.youtube.com/watch?v={urllib.parse.quote(video_id, safe='')}"
+
+
+def _youtube_video_id(parsed: urllib.parse.ParseResult) -> str | None:
+    hostname = (parsed.hostname or "").lower().rstrip(".")
+    path_parts = [part for part in parsed.path.split("/") if part]
+    video_id: str | None = None
+    if hostname == "youtu.be" and path_parts:
+        video_id = path_parts[0]
+    elif path_parts and path_parts[0] in {"embed", "live", "shorts"} and len(path_parts) >= 2:
+        video_id = path_parts[1]
+    elif parsed.path in {"", "/watch"}:
+        query = urllib.parse.parse_qs(parsed.query)
+        candidates = query.get("v") or []
+        video_id = candidates[0] if candidates else None
+    if video_id and _is_plausible_youtube_video_id(video_id):
+        return video_id
+    return None
+
+
+def _is_plausible_youtube_video_id(value: str) -> bool:
+    return 6 <= len(value) <= 32 and all(
+        character.isalnum() or character in {"-", "_"} for character in value
+    )
 
 
 def _resolve_host_ips(hostname: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:

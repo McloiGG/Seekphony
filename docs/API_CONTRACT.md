@@ -83,7 +83,9 @@ Response body is binary audio. Metadata is returned in exposed headers:
 - `X-Seekphony-Byte-Size`
 
 YouTube support depends on `yt-dlp`, remote provider behavior, and deployment
-network limits; it is not guaranteed for every video.
+network limits; it is not guaranteed for every video. YouTube watch URLs with
+playlist/radio query parameters, Shorts URLs, and `youtu.be` share links are
+normalized to a single-video watch URL when a video id is present.
 
 ## Create Evaluation
 

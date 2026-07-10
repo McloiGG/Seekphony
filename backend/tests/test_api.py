@@ -374,6 +374,43 @@ def test_reference_import_endpoint_uses_youtube_adapter(client: TestClient) -> N
     assert response.headers["x-seekphony-filename"] == "youtube-reference.m4a"
 
 
+def test_reference_import_normalizes_youtube_share_and_shorts_urls(client: TestClient) -> None:
+    calls: list[str] = []
+    services = client.app.state.services
+
+    def fake_youtube_import(url: str) -> ImportedReference:
+        calls.append(url)
+        return ImportedReference(
+            content=make_wav(330.0, 5.0),
+            filename="youtube-reference.m4a",
+            media_type="audio/mp4",
+            source_type="youtube",
+            title="YouTube Reference",
+        )
+
+    services.reference_imports = ReferenceImportService(
+        services.settings,
+        resolver=public_resolver,
+        youtube_adapter=fake_youtube_import,
+    )
+
+    urls = [
+        "https://www.youtube.com/watch?v=7wtfhZwyrcc&list=RD7wtfhZwyrcc&start_radio=1",
+        "https://www.youtube.com/shorts/ixQwMYQZ9W8",
+        "https://youtu.be/7wtfhZwyrcc?si=NJmun_IjWKetKPHh",
+    ]
+
+    for url in urls:
+        response = client.post("/api/v1/reference-audio/import", json={"url": url})
+        assert response.status_code == 200
+
+    assert calls == [
+        "https://www.youtube.com/watch?v=7wtfhZwyrcc",
+        "https://www.youtube.com/watch?v=ixQwMYQZ9W8",
+        "https://www.youtube.com/watch?v=7wtfhZwyrcc",
+    ]
+
+
 def test_reference_import_rejects_invalid_and_private_urls(client: TestClient) -> None:
     unsupported = client.post(
         "/api/v1/reference-audio/import", json={"url": "ftp://example.com/a.wav"}
