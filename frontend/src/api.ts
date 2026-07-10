@@ -10,6 +10,8 @@ const REQUEST_TIMEOUT_MS = 60000;
 const EVALUATION_TIMEOUT_MS = 240000;
 const DEVICE_ID_STORAGE_KEY = "seekphony_device_id";
 const DEVICE_ID_HEADER = "X-Seekphony-Device-ID";
+const DEVICE_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 let memoryDeviceId: string | null = null;
 
@@ -185,7 +187,7 @@ async function parseJson(response: Response): Promise<unknown> {
 
 function errorFromPayload(statusCode: number, payload: unknown): SeekphonyApiError {
   if (isApiError(payload)) {
-    return new SeekphonyApiError(payload.message, {
+    return new SeekphonyApiError(userFacingErrorMessage(payload.message), {
       statusCode,
       retryable: payload.retryable ?? statusCode >= 500,
       code: payload.status,
@@ -231,7 +233,7 @@ function deviceHeaders(headers?: HeadersInit): Headers {
 
 function anonymousDeviceId(): string {
   try {
-    const stored = window.localStorage.getItem(DEVICE_ID_STORAGE_KEY);
+    const stored = normalizeDeviceId(window.localStorage.getItem(DEVICE_ID_STORAGE_KEY));
     if (stored) {
       return stored;
     }
@@ -239,9 +241,24 @@ function anonymousDeviceId(): string {
     window.localStorage.setItem(DEVICE_ID_STORAGE_KEY, generated);
     return generated;
   } catch {
-    memoryDeviceId = memoryDeviceId ?? randomUuid();
+    memoryDeviceId = normalizeDeviceId(memoryDeviceId) ?? randomUuid();
     return memoryDeviceId;
   }
+}
+
+function normalizeDeviceId(value: string | null): string | null {
+  const trimmed = value?.trim() ?? "";
+  if (!DEVICE_ID_PATTERN.test(trimmed)) {
+    return null;
+  }
+  return trimmed.toLowerCase();
+}
+
+function userFacingErrorMessage(message: string): string {
+  if (message.includes(DEVICE_ID_HEADER)) {
+    return "Browser session could not be identified. Refresh the page and retry.";
+  }
+  return message;
 }
 
 function randomUuid(): string {
