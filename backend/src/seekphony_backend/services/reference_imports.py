@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import logging
 import mimetypes
 import posixpath
 import socket
@@ -65,6 +66,7 @@ DIRECT_IMPORT_ATTEMPTS = 2
 REFERENCE_IMPORT_USER_AGENT = (
     "Mozilla/5.0 (compatible; Seekphony/0.1; +https://github.com/McloiGG/Seekphony)"
 )
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -362,6 +364,7 @@ def _download_youtube_url(
     except _YouTubeTooLarge as exc:
         raise _too_large(max_bytes) from exc
     except DownloadError as exc:
+        logger.warning("YouTube reference import failed: %s", exc)
         raise AppError(
             502,
             "reference_import_failed",

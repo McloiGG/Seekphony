@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createEvaluation, fetchHealth } from "./api";
+import { createEvaluation, fetchHealth, importReferenceAudio } from "./api";
 
 describe("api client timeouts", () => {
   beforeEach(() => {
@@ -31,6 +31,25 @@ describe("api client timeouts", () => {
       clipDurationSeconds: 20,
       performanceStartSeconds: 0,
     });
+
+    expect(timeoutSpy).toHaveBeenCalledWith(expect.any(Function), 240000);
+  });
+
+  it("uses a longer timeout for reference URL import", async () => {
+    const timeoutSpy = vi.spyOn(window, "setTimeout");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("audio", {
+        status: 200,
+        headers: {
+          "Content-Type": "audio/ogg",
+          "X-Seekphony-Filename": "reference.ogg",
+          "X-Seekphony-Source-Type": "direct_url",
+          "X-Seekphony-Title": "Reference",
+        },
+      }),
+    );
+
+    await importReferenceAudio("https://example.com/reference.ogg");
 
     expect(timeoutSpy).toHaveBeenCalledWith(expect.any(Function), 240000);
   });

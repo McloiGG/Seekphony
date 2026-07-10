@@ -8,6 +8,7 @@ import type {
 
 const REQUEST_TIMEOUT_MS = 60000;
 const EVALUATION_TIMEOUT_MS = 240000;
+const REFERENCE_IMPORT_TIMEOUT_MS = 240000;
 const DEVICE_ID_STORAGE_KEY = "seekphony_device_id";
 const DEVICE_ID_HEADER = "X-Seekphony-Device-ID";
 const DEVICE_ID_PATTERN =
@@ -80,11 +81,15 @@ export async function createEvaluation(payload: EvaluationPayload): Promise<Eval
 }
 
 export async function importReferenceAudio(url: string): Promise<ImportedReferenceAudio> {
-  const response = await requestBlob("/api/v1/reference-audio/import", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url }),
-  });
+  const response = await requestBlob(
+    "/api/v1/reference-audio/import",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    },
+    REFERENCE_IMPORT_TIMEOUT_MS,
+  );
   return {
     blob: response.blob,
     filename: decodeHeader(response.headers.get("X-Seekphony-Filename")) || "reference-audio",
@@ -141,9 +146,10 @@ async function requestJson<T>(
 async function requestBlob(
   path: string,
   init: RequestInit = {},
+  timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<{ blob: Blob; headers: Headers }> {
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(`${apiBaseUrl()}${path}`, {
       ...init,
