@@ -78,3 +78,18 @@ def test_database_url_switches_to_postgres(monkeypatch) -> None:
         monkeypatch.delenv("DATABASE_URL", raising=False)
 
     assert settings.database_kind == "postgres"
+
+
+def test_reference_import_timeout_has_separate_environment_key(monkeypatch) -> None:
+    monkeypatch.setenv("SEEKPHONY_REFERENCE_IMPORT_TIMEOUT_SECONDS", "42")
+    monkeypatch.setenv("SEEKPHONY_PROVIDER_TIMEOUT_SECONDS", "8")
+    get_settings.cache_clear()
+    try:
+        settings = get_settings()
+    finally:
+        get_settings.cache_clear()
+        monkeypatch.delenv("SEEKPHONY_REFERENCE_IMPORT_TIMEOUT_SECONDS", raising=False)
+        monkeypatch.delenv("SEEKPHONY_PROVIDER_TIMEOUT_SECONDS", raising=False)
+
+    assert settings.reference_import_timeout_seconds == 42.0
+    assert settings.provider_timeout_seconds == 8.0

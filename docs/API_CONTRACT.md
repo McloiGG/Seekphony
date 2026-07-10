@@ -72,6 +72,8 @@ Accepts JSON:
 The backend imports direct audio URLs and best-effort YouTube links, validates
 HTTP(S) targets, rejects local/private/reserved hosts, enforces the configured
 30 MB limit, and returns the imported audio bytes without permanent storage.
+Reference import uses `SEEKPHONY_REFERENCE_IMPORT_TIMEOUT_SECONDS` and direct
+URL imports retry once for transient network failures.
 
 Response body is binary audio. Metadata is returned in exposed headers:
 
@@ -80,7 +82,8 @@ Response body is binary audio. Metadata is returned in exposed headers:
 - `X-Seekphony-Title`
 - `X-Seekphony-Byte-Size`
 
-YouTube support depends on `yt-dlp` and is not guaranteed for every video.
+YouTube support depends on `yt-dlp`, remote provider behavior, and deployment
+network limits; it is not guaranteed for every video.
 
 ## Create Evaluation
 

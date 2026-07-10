@@ -61,6 +61,11 @@ ALLOWED_MEDIA_TYPES = {
     "video/webm",
 }
 
+DIRECT_IMPORT_ATTEMPTS = 2
+REFERENCE_IMPORT_USER_AGENT = (
+    "Mozilla/5.0 (compatible; Seekphony/0.1; +https://github.com/McloiGG/Seekphony)"
+)
+
 
 @dataclass(frozen=True, slots=True)
 class ImportedReference:
@@ -103,7 +108,7 @@ class ReferenceImportService:
         return _download_direct_url(
             raw_url,
             max_bytes=self.settings.max_upload_bytes,
-            timeout_seconds=self.settings.provider_timeout_seconds,
+            timeout_seconds=self.settings.reference_import_timeout_seconds,
             resolver=self.resolver,
         )
 
@@ -115,7 +120,7 @@ class ReferenceImportService:
         return _download_youtube_url(
             raw_url,
             max_bytes=self.settings.max_upload_bytes,
-            timeout_seconds=self.settings.provider_timeout_seconds,
+            timeout_seconds=self.settings.reference_import_timeout_seconds,
         )
 
 
@@ -197,35 +202,51 @@ def _download_direct_url(
             validate_public_http_url(newurl, resolver)
             return super().redirect_request(req, fp, code, msg, headers, newurl)
 
+    opener = urllib.request.build_opener(RedirectValidator)
+    last_error: BaseException | None = None
+    for _attempt in range(DIRECT_IMPORT_ATTEMPTS):
+        try:
+            return _download_direct_once(raw_url, max_bytes, timeout_seconds, resolver, opener)
+        except AppError:
+            raise
+        except (TimeoutError, urllib.error.URLError, OSError) as exc:
+            last_error = exc
+    raise AppError(
+        502,
+        "reference_import_failed",
+        "Reference URL could not be imported. Retry or upload the file directly.",
+        retryable=True,
+        stage="direct_url",
+    ) from last_error
+
+
+def _download_direct_once(
+    raw_url: str,
+    max_bytes: int,
+    timeout_seconds: float,
+    resolver: HostResolver,
+    opener: urllib.request.OpenerDirector,
+) -> ImportedReference:
     request = urllib.request.Request(
         raw_url,
-        headers={"User-Agent": "Seekphony/0.1 reference-importer"},
+        headers={
+            "Accept": "audio/*,video/*,*/*;q=0.8",
+            "User-Agent": REFERENCE_IMPORT_USER_AGENT,
+        },
         method="GET",
     )
-    opener = urllib.request.build_opener(RedirectValidator)
-    try:
-        with opener.open(request, timeout=timeout_seconds) as response:
-            final_url = response.geturl()
-            validate_public_http_url(final_url, resolver)
-            content_length = response.headers.get("Content-Length")
-            if content_length and int(content_length) > max_bytes:
-                raise _too_large(max_bytes)
-            media_type = response.headers.get_content_type() or "application/octet-stream"
-            filename = _filename_from_headers(response.headers.get("Content-Disposition"))
-            if not filename:
-                filename = _filename_from_url(final_url, media_type)
-            _validate_media_type(media_type, filename)
-            content = _read_limited(response, max_bytes)
-    except AppError:
-        raise
-    except (TimeoutError, urllib.error.URLError, OSError) as exc:
-        raise AppError(
-            502,
-            "reference_import_failed",
-            "Reference URL could not be imported.",
-            retryable=True,
-            stage="direct_url",
-        ) from exc
+    with opener.open(request, timeout=timeout_seconds) as response:
+        final_url = response.geturl()
+        validate_public_http_url(final_url, resolver)
+        content_length = response.headers.get("Content-Length")
+        if content_length and int(content_length) > max_bytes:
+            raise _too_large(max_bytes)
+        media_type = response.headers.get_content_type() or "application/octet-stream"
+        filename = _filename_from_headers(response.headers.get("Content-Disposition"))
+        if not filename:
+            filename = _filename_from_url(final_url, media_type)
+        _validate_media_type(media_type, filename)
+        content = _read_limited(response, max_bytes)
     return ImportedReference(
         content=content,
         filename=filename,

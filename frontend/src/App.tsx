@@ -21,6 +21,13 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, DragEvent, ReactNode, SyntheticEvent } from "react";
 
 import {
+  alignedClipEndSeconds,
+  CLIP_STEP_SECONDS,
+  resolveRecordedDuration,
+  sampleCountForDuration,
+  shouldUseTargetRecordingDuration,
+} from "./audioTiming";
+import {
   clearEvaluationRecords,
   createEvaluation,
   deleteEvaluationRecord,
@@ -56,7 +63,7 @@ interface SelectedAudio {
 }
 
 interface WavRecorder {
-  stop: () => Promise<Blob>;
+  stop: (targetDurationSeconds?: number) => Promise<Blob>;
 }
 
 interface SourceTab<T extends string> {
@@ -88,6 +95,7 @@ export default function App() {
   const [selectedHistory, setSelectedHistory] = useState<EvaluationResponse | null>(null);
   const recorderRef = useRef<WavRecorder | null>(null);
   const recordingDurationRef = useRef(DEFAULT_MAX_CLIP_SECONDS);
+  const recordingStartedAtRef = useRef<number | null>(null);
   const timerRef = useRef<number | null>(null);
   const referenceRef = useRef<SelectedAudio | null>(null);
   const performanceRef = useRef<SelectedAudio | null>(null);
@@ -284,17 +292,25 @@ export default function App() {
     });
   }
 
-  function replacePerformanceAudio(blob: Blob, filename: string, title: string, sourceLabel: string) {
+  function replacePerformanceAudio(
+    blob: Blob,
+    filename: string,
+    title: string,
+    sourceLabel: string,
+    preferredDurationSeconds: number | null = null,
+  ) {
     const objectUrl = createObjectUrl(blob);
+    const initialDuration =
+      preferredDurationSeconds == null ? null : resolveRecordedDuration(preferredDurationSeconds, null);
     const audio: SelectedAudio = {
       blob,
       filename,
       objectUrl,
-      duration: null,
+      duration: initialDuration,
       title,
       sourceLabel,
     };
-    const fallbackDuration = clamp(recordDuration, limits.minClipSeconds, limits.maxClipSeconds);
+    const fallbackDuration = alignedClipEndSeconds(initialDuration ?? recordDuration, limits);
     setPerformanceStart(0);
     setPerformanceEnd(fallbackDuration);
     setPerformanceAudio((current) => {
@@ -302,10 +318,11 @@ export default function App() {
       return audio;
     });
     loadAudioDuration(objectUrl, (duration) => {
-      const defaultEnd = clamp(duration, limits.minClipSeconds, limits.maxClipSeconds);
+      const resolvedDuration = resolveRecordedDuration(duration, preferredDurationSeconds);
+      const defaultEnd = alignedClipEndSeconds(resolvedDuration, limits);
       setPerformanceEnd(defaultEnd);
       setPerformanceAudio((current) =>
-        current?.objectUrl === objectUrl ? { ...current, duration } : current,
+        current?.objectUrl === objectUrl ? { ...current, duration: resolvedDuration } : current,
       );
     });
   }
@@ -385,6 +402,7 @@ export default function App() {
 
   function startRecordingTimer(seconds: number) {
     const startAt = Date.now();
+    recordingStartedAtRef.current = startAt;
     const stopAt = startAt + seconds * 1000;
     setRecordElapsedSeconds(0);
     setRecordRemainingSeconds(Math.ceil(seconds));
@@ -394,22 +412,29 @@ export default function App() {
       setRecordElapsedSeconds(elapsed);
       setRecordRemainingSeconds(remaining);
       if (remaining <= 0) {
-        void finishRecording();
+        void finishRecording({ targetDurationSeconds: seconds });
       }
     }, 1000);
   }
 
-  async function finishRecording() {
+  async function finishRecording(options: { targetDurationSeconds?: number } = {}) {
     if (timerRef.current) {
       window.clearInterval(timerRef.current);
       timerRef.current = null;
     }
     setRecordElapsedSeconds(null);
     setRecordRemainingSeconds(null);
-    const blob = await stopRecorder();
+    const targetDurationSeconds = options.targetDurationSeconds ?? targetDurationIfNearLimit();
+    const blob = await stopRecorder(targetDurationSeconds);
+    recordingStartedAtRef.current = null;
     if (blob) {
-      replacePerformanceAudio(blob, "seekphony-performance.wav", "Recorded WAV take", "Recording");
-      setPerformanceEnd(clamp(recordingDurationRef.current, limits.minClipSeconds, limits.maxClipSeconds));
+      replacePerformanceAudio(
+        blob,
+        "seekphony-performance.wav",
+        "Recorded WAV take",
+        "Recording",
+        targetDurationSeconds ?? null,
+      );
       setNotice({
         kind: "success",
         title: "Recording ready",
@@ -417,6 +442,18 @@ export default function App() {
       });
     }
     setBusy("idle");
+  }
+
+  function targetDurationIfNearLimit(): number | undefined {
+    const startedAt = recordingStartedAtRef.current;
+    const targetDuration = recordingDurationRef.current;
+    if (!startedAt) {
+      return undefined;
+    }
+    const elapsedSeconds = (Date.now() - startedAt) / 1000;
+    return shouldUseTargetRecordingDuration(elapsedSeconds, targetDuration)
+      ? targetDuration
+      : undefined;
   }
 
   function updateRecordDurationDraft(value: string) {
@@ -439,13 +476,13 @@ export default function App() {
     return next;
   }
 
-  async function stopRecorder(): Promise<Blob | null> {
+  async function stopRecorder(targetDurationSeconds?: number): Promise<Blob | null> {
     const recorder = recorderRef.current;
     recorderRef.current = null;
     if (!recorder) {
       return null;
     }
-    return recorder.stop();
+    return recorder.stop(targetDurationSeconds);
   }
 
   async function handleDeleteEvaluation(evaluationId: number) {
@@ -701,7 +738,7 @@ export default function App() {
                     <input
                       min={0}
                       max={maxReferenceStart || undefined}
-                      step={0.5}
+                      step={CLIP_STEP_SECONDS}
                       type="number"
                       value={referenceStart}
                       onChange={(event) => setReferenceStart(Number(event.target.value))}
@@ -728,7 +765,7 @@ export default function App() {
                       <input
                         min={0}
                         max={maxPerformanceStart}
-                        step={0.5}
+                        step={CLIP_STEP_SECONDS}
                         type="number"
                         value={performanceStart}
                         onChange={(event) => setPerformanceStart(Number(event.target.value))}
@@ -739,7 +776,7 @@ export default function App() {
                       <input
                         min={limits.minClipSeconds}
                         max={maxPerformanceEnd}
-                        step={0.5}
+                        step={CLIP_STEP_SECONDS}
                         type="number"
                         value={performanceEnd}
                         onChange={(event) => setPerformanceEnd(Number(event.target.value))}
@@ -1354,22 +1391,31 @@ async function startWavRecorder(): Promise<WavRecorder> {
   gain.connect(context.destination);
 
   return {
-    stop: async () => {
+    stop: async (targetDurationSeconds?: number) => {
       processor.disconnect();
       source.disconnect();
       gain.disconnect();
       stream.getTracks().forEach((track) => track.stop());
       await context.close();
-      return encodeWav(chunks, sampleCount, context.sampleRate);
+      return encodeWav(chunks, sampleCount, context.sampleRate, targetDurationSeconds);
     },
   };
 }
 
-function encodeWav(chunks: Float32Array[], sampleCount: number, sampleRate: number): Blob {
-  const buffer = new ArrayBuffer(44 + sampleCount * 2);
+function encodeWav(
+  chunks: Float32Array[],
+  sampleCount: number,
+  sampleRate: number,
+  targetDurationSeconds?: number,
+): Blob {
+  const outputSampleCount =
+    targetDurationSeconds == null
+      ? sampleCount
+      : sampleCountForDuration(targetDurationSeconds, sampleRate);
+  const buffer = new ArrayBuffer(44 + outputSampleCount * 2);
   const view = new DataView(buffer);
   writeString(view, 0, "RIFF");
-  view.setUint32(4, 36 + sampleCount * 2, true);
+  view.setUint32(4, 36 + outputSampleCount * 2, true);
   writeString(view, 8, "WAVE");
   writeString(view, 12, "fmt ");
   view.setUint32(16, 16, true);
@@ -1380,15 +1426,28 @@ function encodeWav(chunks: Float32Array[], sampleCount: number, sampleRate: numb
   view.setUint16(32, 2, true);
   view.setUint16(34, 16, true);
   writeString(view, 36, "data");
-  view.setUint32(40, sampleCount * 2, true);
+  view.setUint32(40, outputSampleCount * 2, true);
 
   let offset = 44;
+  let writtenSamples = 0;
   for (const chunk of chunks) {
     for (const sample of chunk) {
+      if (writtenSamples >= outputSampleCount) {
+        break;
+      }
       const clamped = Math.max(-1, Math.min(1, sample));
       view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
       offset += 2;
+      writtenSamples += 1;
     }
+    if (writtenSamples >= outputSampleCount) {
+      break;
+    }
+  }
+  while (writtenSamples < outputSampleCount) {
+    view.setInt16(offset, 0, true);
+    offset += 2;
+    writtenSamples += 1;
   }
   return new Blob([view], { type: "audio/wav" });
 }

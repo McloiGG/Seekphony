@@ -74,6 +74,7 @@ def make_settings(tmp_path: Path, *, admin_token: str | None = ADMIN_TOKEN) -> S
         gemini_api_key=None,
         gemini_model="gemini-3.1-flash-lite",
         provider_timeout_seconds=0.1,
+        reference_import_timeout_seconds=30.0,
         admin_token=admin_token,
         cors_origins=("*",),
     )

@@ -247,7 +247,9 @@ frontend and stored in browser `localStorage`. The admin route requires
   3.14 compatibility risk.
 - `ffmpeg` is installed in the backend Docker image for broader upload decoding.
 - `yt-dlp==2026.7.4` powers best-effort YouTube reference import. Direct uploads
-  and direct audio URLs remain the more reliable MVP path.
+  and direct audio URLs remain the more reliable MVP path. Reference URL import
+  has a separate timeout, `SEEKPHONY_REFERENCE_IMPORT_TIMEOUT_SECONDS`, and
+  direct URL imports retry once for transient network failures.
 - Gemini is used for explanation only, not metric calculation.
 - Raw audio is processed transiently and not stored permanently.
 - SQLite is the local default; `DATABASE_URL` switches deployment to Postgres.
@@ -265,8 +267,8 @@ frontend and stored in browser `localStorage`. The admin route requires
   identity; clearing site data creates a new history identity.
 - Saved evaluation history does not replay old audio because raw audio is not
   stored permanently.
-- YouTube import is best effort and may fail when the provider blocks extraction
-  or hosted resources are too limited.
+- YouTube import is best effort and may fail when the provider blocks extraction,
+  throttles cloud-hosted requests, or hosted resources are too limited.
 - Non-WAV local native runs require `ffmpeg` on PATH.
 - Render free resources may be slow for long clips, so the backend enforces short
   clip limits.

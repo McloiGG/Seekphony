@@ -59,6 +59,7 @@ const evaluationPayload: EvaluationResponse = {
 describe("App", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     window.localStorage.clear();
     window.__SEEKPHONY_CONFIG__ = { apiBaseUrl: "http://localhost:8000" };
     vi.spyOn(window, "confirm").mockReturnValue(true);
@@ -188,6 +189,46 @@ describe("App", () => {
 
     expect(screen.getByText("Performance playback ready")).toBeInTheDocument();
     expect(screen.getAllByText(/performance-drop.wav/).length).toBeGreaterThan(0);
+  });
+
+  it("aligns performance upload duration to a valid trim step", async () => {
+    Object.defineProperty(window.URL, "createObjectURL", {
+      configurable: true,
+      value: vi.fn(() => "blob:performance"),
+    });
+    Object.defineProperty(window.URL, "revokeObjectURL", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    vi.stubGlobal(
+      "Audio",
+      class {
+        duration = 9.865;
+        onloadedmetadata: (() => void) | null = null;
+
+        constructor() {
+          window.setTimeout(() => this.onloadedmetadata?.(), 0);
+        }
+      },
+    );
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/health")) {
+        return jsonResponse(healthPayload);
+      }
+      return jsonResponse({ status: "ok", evaluations: [] });
+    });
+
+    render(<App />);
+
+    await screen.findByText("Choose audio, trim, evaluate");
+    await userEvent.click(screen.getAllByRole("tab", { name: "Upload" })[1]);
+    await userEvent.upload(
+      screen.getByLabelText(/Performance upload/i),
+      new File(["wav"], "performance.wav", { type: "audio/wav" }),
+    );
+
+    await waitFor(() => expect(screen.getByLabelText("End at")).toHaveValue(9.5));
   });
 
   it("loads reference audio from the URL tab and enables playback", async () => {
