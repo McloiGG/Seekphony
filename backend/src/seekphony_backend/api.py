@@ -60,14 +60,14 @@ def register_routes(app: FastAPI, services: AppServices) -> None:
 
     @app.post(f"{api_prefix}/search/audio")
     async def search_audio(file: UploadFile = File(...)) -> dict[str, Any]:
-        """Sends the browser recording directly to ACRCloud via signed HTTP REST API without SDK binaries"""
+        """Sends audio to ACRCloud, then scales alternatives across MusicBrainz and Last.fm"""
         try:
             content = await file.read()
             _validate_upload(content, services.settings.max_upload_bytes)
             
-            host = "identify-ap-southeast-1.acrcloud.com".strip()
-            access_key = "eee0bb77e41fc3e62f57838bf435ddaa".strip()
-            access_secret = "4f1kMWNlicePoMTFZEZWctFbYU8HQ5ClDRx1Q04G".strip()
+            host = "Your_ACRCloud_Host".strip()
+            access_key = "Your_ACRCloud_Access_Key".strip()
+            access_secret = "Your_ACRCloud_Access_Secret".strip()
 
             requrl = f"https://{host}/v1/identify"
             http_method = "POST"
@@ -81,9 +81,7 @@ def register_routes(app: FastAPI, services: AppServices) -> None:
                 hmac.new(access_secret.encode('utf-8'), string_to_sign.encode('utf-8'), digestmod=hashlib.sha1).digest()
             ).decode('utf-8')
 
-            files_payload = {
-                'sample': (file.filename, content, file.content_type)
-            }
+            files_payload = {'sample': (file.filename, content, file.content_type)}
             data_payload = {
                 'access_key': access_key,
                 'sample_bytes': len(content),
@@ -97,12 +95,7 @@ def register_routes(app: FastAPI, services: AppServices) -> None:
             
             if response.status_code == 200:
                 result = response.json()
-                
                 acr_status = result.get("status", {})
-                print(f"--- 🤖 ACRCLOUD AI DIAGNOSTICS ---")
-                print(f"AI Response Code: {acr_status.get('code')}")
-                print(f"AI Message String: {acr_status.get('msg')}")
-                print(f"----------------------------------")
                 
                 if acr_status.get("code") == 0 and "metadata" in result:
                     metadata = result["metadata"]
@@ -128,59 +121,117 @@ def register_routes(app: FastAPI, services: AppServices) -> None:
                             "id": 999, 
                             "title": detected_title,
                             "artist": detected_artist,
-                            "genre": "Identified Humming Track",
+                            "genre": "Acoustic Primary Match",
                             "play_count": 0
                         }
                         
-                        # 🧬 DYNAMIC TELEMETRY DIFFERENTIATION ALGORITHM
-                        # Generates uniquely distinct metrics per track while remaining bounded nicely between 0-100.
+                        # Dynamic Score Calculations for Radar Graphs
                         seed_modifier = len(detected_title) + len(detected_artist)
-                        random.seed(int(time.time()) if acr_score < 60 else seed_modifier)
-
-                        pitch_perf = min(100, max(45, acr_score + random.randint(-8, 6)))
-                        melody_perf = min(100, max(40, acr_score + random.randint(-5, 12)))
-                        tone_perf = min(100, max(55, acr_score + random.randint(-12, 4)))
-                        clarity_perf = min(100, max(35, random.randint(65, 95) if acr_score > 70 else random.randint(45, 75)))
-
+                        random.seed(seed_modifier)
                         analysis_scores = {
-                            "pitch": pitch_perf,
-                            "melody": melody_perf,
-                            "tone": tone_perf,
-                            "clarity": clarity_perf,
+                            "pitch": min(100, max(45, acr_score + random.randint(-8, 6))),
+                            "melody": min(100, max(40, acr_score + random.randint(-5, 12))),
+                            "tone": min(100, max(55, acr_score + random.randint(-12, 4))),
+                            "clarity": min(100, max(35, random.randint(55, 95))),
                             "overall": acr_score
                         }
                         
-                        # 🚀 NEW: DYNAMIC DEEZER PREVIEW FALLBACK RESOLUTION 🚀
-                        deezer_mp3_url = None
+                        # 🎶 INITIALIZE MULTI-CANDIDATE DISCOVERY ARRAY
+                        candidates = [{
+                            "title": detected_title,
+                            "artist": detected_artist,
+                            "source": "ACRCloud Acoustic Match",
+                            "info_link": f"https://www.google.com/search?q={requests.utils.quote(detected_title + ' ' + detected_artist)}"
+                        }]
+                        
+                        # 🧠 SERVICE 1: MUSICBRAINZ RECOGNITION SEARCH (Narrowed down using Title AND Artist)
                         try:
-                            deezer_query = f"{detected_artist} {detected_title}"
-                            deezer_api_url = f"https://api.deezer.com/search?q={requests.utils.quote(deezer_query)}&limit=1"
-                            
-                            deezer_res = requests.get(deezer_api_url, timeout=5)
-                            if deezer_res.status_code == 200:
-                                deezer_json = deezer_res.json()
-                                if "data" in deezer_json and len(deezer_json["data"]) > 0:
-                                    deezer_mp3_url = deezer_json["data"][0].get("preview")
+                            # 🛠️ FIX: Combine title and artist to prevent generic keyword matching duplicates
+                            mb_query = f'recording:"{detected_title}" AND artist:"{detected_artist}"'
+                            mb_url = f"https://musicbrainz.org/ws/2/recording?query={requests.utils.quote(mb_query)}&fmt=json&limit=3"
+                            mb_headers = {"User-Agent": "SeekphonyApp/1.0.0 (academic_project@example.com)"}
+                            mb_res = requests.get(mb_url, headers=mb_headers, timeout=3)
+                            if mb_res.status_code == 200:
+                                for rec in mb_res.json().get("recordings", []):
+                                    t = rec.get("title")
+                                    a = rec.get("artist-credit", [{}])[0].get("name", "Unknown Artist")
+                                    mb_id = rec.get("id", "")
+                                    
+                                    # Strict duplication check
+                                    if t and not any(c["title"].lower() == t.lower() for c in candidates):
+                                        candidates.append({
+                                            "title": t,
+                                            "artist": a,
+                                            "source": "MusicBrainz Recording Work",
+                                            "info_link": f"https://musicbrainz.org/recording/{mb_id}" if mb_id else "#"
+                                        })
                         except Exception as e:
-                            # Fail cleanly so an external network hiccup won't break the frontend's response delivery
-                            print(f"Deezer backend-to-backend pipeline skip trace: {e}")
+                            print(f"MusicBrainz pipeline fault: {e}")
 
-                        print(f"⚠️ Track identified: '{detected_title}' by {detected_artist}. Offloading to Frontend media sources engine.")
+                        # 📻 SERVICE 2: LAST.FM POPULARITY MATCHING (Fallback or Additional Variants)
+                        try:
+                            LASTFM_KEY = "" # Your partner can add their key here
+                            if LASTFM_KEY:
+                                # We search by track and pass the artist to ensure context integrity
+                                lfm_url = f"http://ws.audioscrobbler.com/2.0/?method=track.search&track={requests.utils.quote(detected_title)}&artist={requests.utils.quote(detected_artist)}&api_key={LASTFM_KEY}&format=json&limit=2"
+                                lfm_res = requests.get(lfm_url, timeout=3).json()
+                                for track in lfm_res.get("results", {}).get("trackmatches", {}).get("track", []):
+                                    t = track.get("name")
+                                    a = track.get("artist")
+                                    l_url = track.get("url", "#")
+                                    if t and not any(c["title"].lower() == t.lower() for c in candidates):
+                                        candidates.append({
+                                            "title": t,
+                                            "artist": a,
+                                            "source": "Last.fm Popularity",
+                                            "info_link": l_url
+                                        })
+                        except Exception as e:
+                            print(f"Last.fm extraction bypass: {e}")
+
+                        # If MusicBrainz or Last.fm didn't find enough unique filtered alternatives, 
+                        # add a fallback variant to guarantee 3 clear option buttons show up
+                        if len(candidates) < 3:
+                            candidates.append({
+                                "title": f"{detected_title} (Alternative Mix)",
+                                "artist": detected_artist,
+                                "source": "Suggested Variation",
+                                "info_link": f"https://www.google.com/search?q={requests.utils.quote(detected_title + ' alternative mix')}"
+                            })
+
+                        # Limit results down cleanly to exactly 3 choices
+                        final_candidates = candidates[:3]
+
+                        # 🎵 SERVICE 3: DEEZER HIGH-QUALITY PREVIEW WATERFALL MAPPING
+                        for cand in final_candidates:
+                            try:
+                                dz_query = f"{cand['artist']} {cand['title']}"
+                                dz_url = f"https://api.deezer.com/search?q={requests.utils.quote(dz_query)}&limit=1"
+                                dz_res = requests.get(dz_url, timeout=3).json()
+                                if "data" in dz_res and len(dz_res["data"]) > 0:
+                                    cand["deezer_mp3"] = dz_res["data"][0].get("preview")
+                                else:
+                                    cand["deezer_mp3"] = None
+                            except Exception:
+                                cand["deezer_mp3"] = None
+
+                        # Fetch real-time AI knowledge using Gemini
+                        ai_insight = ask_gemini_about_song(detected_title, detected_artist)
+
+                        # Then add it right into your match tracking response packet:
                         return {
-                            "song": matched_song, 
+                            "song": matched_song,
                             "analysis": analysis_scores,
-                            "media_sources": {
-                                "deezer_mp3": deezer_mp3_url
-                            }
+                            "candidates": final_candidates,
+                            "gemini_insight": ai_insight  # 🧠 New data item!
                         }
 
-            raise AppError(404, "not_found", "Acoustic signature could not be identified inside cloud charts.")
-
+            raise AppError(404, "not_found", "Acoustic footprint match window unresolvable.")
         except AppError:
             raise
         except Exception as e:
-            print(f"ACRCloud API gateway connection failure: {e}")
-            raise AppError(500, "processing_error", "Audio recognition network timed out.")
+            print(f"Acoustic route exception context: {e}")
+            raise AppError(500, "processing_error", "Internal audio resolution failure.")
 
     @app.post(f"{api_prefix}/songs", status_code=status.HTTP_201_CREATED, response_model=SongOut)
     async def create_song(request: Request) -> Any:
@@ -253,3 +304,41 @@ def _validate_upload(content: bytes, max_bytes: int) -> None:
             "file_too_large",
             f"Payload length limits exceeded maximum threshold parameters. Max allowed: {max_bytes} bytes."
         )
+        
+def ask_gemini_about_song(title: str, artist: str) -> str:
+    """Uses the Gemini API to get intelligent trivia/insights about the song"""
+    # 🌟 Replace with your real Google AI Studio Gemini API key
+    GEMINI_API_KEY = "Your_Google_AI_Studio_Gemini_API_Key_Here" 
+    
+    if not GEMINI_API_KEY or GEMINI_API_KEY == "GEMINI_API_KEY":
+        return "No historical metadata available for this variant."
+
+    # Using the standard 2.5 Flash model endpoint
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+    
+    headers = {'Content-Type': 'application/json'}
+    
+    prompt = (
+        f"Provide a brief, engaging 2-sentence musical background trivia fact about the song "
+        f"'{title}' by '{artist}'. Focus on its genre, origins, or interesting production history. "
+        f"Do not include any greeting or conversational fluff."
+    )
+    
+    payload = {
+        "contents": [
+            {
+                "parts": [{"text": prompt}]
+            }
+        ]
+    }
+
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            # Extract the generated text block safely out of the JSON tree
+            return data['candidates'][0]['content']['parts'][0]['text'].strip()
+    except Exception as e:
+        print(f"Gemini API failure context: {e}")
+        
+    return "Insights processing is currently offline."

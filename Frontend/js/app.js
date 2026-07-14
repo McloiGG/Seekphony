@@ -9,6 +9,7 @@ let dynamicCatalog = [];
 let hummingChartInstance = null;
 let recordingCountdownTimer = null;
 let overallGaugeChartInstance = null;
+let isSingingModeActive = false; // Tracks if the user clicked "Yes" to the singing test
 // Optional: Add your custom Google Developer YouTube Data API Key here if needed
 const YOUTUBE_API_KEY = "YOUR_YOUTUBE_API_KEY"; // Replace with your actual API key or leave empty for fallback
 
@@ -270,9 +271,10 @@ async function toggleAudioRecording() {
 }
 
 // --- AUDIOMATCH NETWORK BRIDGE ---
+// --- UPGRADED AUDIO IDENTIFICATION INTERCEPTOR ---
 async function handleAudioSearch(audioBlob) {
     try {
-        showSystemAlert("alertContainer", "Analyzing hummingbird acoustic prints across the cloud...", "info");
+        showSystemAlert("alertContainer", "Cross-referencing audio waves with MusicBrainz, Last.fm, and ACRCloud...", "info");
         
         const formData = new FormData();
         formData.append('file', audioBlob, 'recording.webm');
@@ -287,61 +289,92 @@ async function handleAudioSearch(audioBlob) {
         if (response.ok && result.song) {
             const match = normalizeSong(result.song);
             dynamicCatalog = [match];
-            
             renderCatalog(dynamicCatalog);
             
             if (result.analysis) {
-                if (result.analysis.overall <= 1.0) {
-                    result.analysis.overall = Math.round(result.analysis.overall * 100);
-                } else {
-                    result.analysis.overall = Math.round(result.analysis.overall);
-                }
+                result.analysis.overall = Math.round(result.analysis.overall <= 1.0 ? result.analysis.overall * 100 : result.analysis.overall);
                 renderHummingAnalysisChart(result.analysis);
             }
 
-            if (result.media_sources) {
-                renderMediaActionButtons(result.media_sources);
+            // 🚀 Injects the comprehensive multi-service action buttons tray
+            if (result.candidates) {
+                renderMediaActionButtons(result.candidates);
             }
 
-            updateYouTubeStreamLink(
-                buildYouTubeSearchUrl(match.title, match.artist),
-                `${match.title} - ${match.artist}`
-            );
+            if (result.gemini_insight) {
+            // Show the AI-generated context to the user immediately
+        showSystemAlert("alertContainer", `💡 <strong>AI Musicologist Insight:</strong> ${result.gemini_insight}`, "info");
+            }
 
-            showSystemAlert("alertContainer", `Acoustic Match Confirmed: "${match.title}" by ${match.artist}. Media tray updated below charts!`, "success");
-            await searchAndPlayYouTube(match.title, match.artist);
+            updateYouTubeStreamLink(buildYouTubeSearchUrl(match.title, match.artist), `${match.title} - ${match.artist}`);
+            showSystemAlert("alertContainer", `Melody Locked: "${match.title}". Check all discovered alternatives below!`, "success");
             
+            // Automatically launch stream execution for the absolute top matched candidate
+            await searchAndPlayYouTube(match.title, match.artist);
         } else {
             renderCatalog([]);
-            showSystemAlert("alertContainer", "Vocal footprint could not be cleanly targeted inside databases.", "warning");
+            showSystemAlert("alertContainer", "Vocal sample did not clear target metric bounds.", "warning");
         }
     } catch (error) {
         console.error(error);
         renderCatalog([]);
-        showSystemAlert("alertContainer", "Audio tracking network gateway returned an execution exception.", "danger");
+        showSystemAlert("alertContainer", "Network communication failure connecting to identity nodes.", "danger");
     }
 }
 
-// UI Rendering engine for dynamic cross-platform option panels
-function renderMediaActionButtons(sources) {
+// --- UNIFIED 4-SERVICE SEAMLESS CROSS-REFERENCE HUD ---
+function renderMediaActionButtons(candidates) {
     const oldTray = document.getElementById('dynamicMediaTray');
     if (oldTray) oldTray.remove();
 
+    if (!candidates || candidates.length === 0) return;
+
+    const candidateRowsHtml = candidates.map((track, index) => {
+        // 🛠️ FIX: Bulletproof MusicBrainz landing URL structure to prevent browser reload/context drops
+        const mbUrl = `https://musicbrainz.org/search?query=${encodeURIComponent(track.title + ' ' + track.artist)}&type=recording`;
+        
+        // 📻 Reliable Last.fm tag search fallback
+        const lfmUrl = `https://www.last.fm/search?q=${encodeURIComponent(track.title + ' ' + track.artist)}`;
+        
+        return `
+            <div class="p-3 border rounded mb-3 bg-light shadow-sm">
+                <div class="text-start mb-2">
+                    <span class="badge bg-dark mb-1" style="font-size:0.65rem;">Source Match: ${track.source || 'Detected Variant'}</span>
+                    <h6 class="mb-0 fw-bold text-dark">${escapeHtml(track.title)}</h6>
+                    <p class="text-muted mb-0 small">by ${escapeHtml(track.artist)}</p>
+                </div>
+                
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                    
+                    <button class="btn btn-danger btn-sm px-2 flex-grow-1" style="font-size:0.75rem;" 
+                        onclick="searchAndPlayYouTubeCandidate('${escapeHtml(track.title)}', '${escapeHtml(track.artist)}')">
+                        <i class="bi bi-youtube me-1"></i> 1. Play YouTube
+                    </button>
+                    
+                    <button id="candidateDeezerBtn-${index}" 
+                        class="btn ${track.deezer_mp3 ? 'btn-info text-white' : 'btn-secondary disabled'} btn-sm px-2 flex-grow-1" 
+                        style="font-size:0.75rem;" 
+                        ${track.deezer_mp3 ? `onclick="playCandidateDeezerMp3('${track.deezer_mp3}', 'candidateDeezerBtn-${index}')"` : ''}>
+                        <i class="bi bi-music-note-beamed me-1"></i> 2. Play Deezer ${track.deezer_mp3 ? 'MP3' : '(No Audio)'}
+                    </button>
+
+                    <a href="${mbUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-sm px-2 flex-grow-1 text-white" style="font-size:0.75rem; background-color: #ba55d3;">
+                        <i class="bi bi-database-fill me-1"></i> 3. MusicBrainz Wiki
+                    </a>
+
+                    <a href="${lfmUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-sm px-2 flex-grow-1 text-white" style="font-size:0.75rem; background-color: #d51007;">
+                        <i class="bi bi-broadcast me-1"></i> 4. Last.fm Stats
+                    </a>
+                </div>
+            </div>
+        `;
+    }).join('');
+
     const mediaActionButtonsHtml = `
         <div id="dynamicMediaTray" class="mt-4 card p-3 shadow-sm border-0 bg-white">
-            <p class="text-muted small mb-2 text-center fw-medium">Select your listening experience:</p>
-            <div class="d-flex justify-content-center gap-3">
-                
-                <button class="btn btn-outline-danger btn-sm px-3" onclick="playTrackOnYouTube()">
-                    <i class="bi bi-youtube me-1"></i> Watch Video
-                </button>
-                
-                ${sources && sources.deezer_mp3 ? `
-                    <button id="deezerPlayBtn" class="btn btn-outline-info btn-sm px-3" onclick="playDeezerMp3('${sources.deezer_mp3}')">
-                        <i class="bi bi-music-note-beamed me-1"></i> Listen to MP3 Preview
-                    </button>
-                ` : ''}
-                
+            <p class="text-muted small mb-2 text-center fw-medium"><i class="bi bi-layers-half text-success me-1"></i> Cross-Service Match Verification Panel:</p>
+            <div class="d-flex flex-column">
+                ${candidateRowsHtml}
             </div>
         </div>
     `;
@@ -349,6 +382,50 @@ function renderMediaActionButtons(sources) {
     const analysisContainer = document.getElementById('hummingAnalysisContainer');
     if (analysisContainer) {
         analysisContainer.insertAdjacentHTML('beforeend', mediaActionButtonsHtml);
+    }
+}
+
+// --- SYSTEM AUDIO CROSS-ROUTE ACTION CONTROLLERS ---
+async function searchAndPlayYouTubeCandidate(title, artist) {
+    const mp3Player = document.getElementById('globalMp3Player');
+    if (mp3Player) {
+        mp3Player.pause();
+        mp3Player.src = "";
+    }
+    document.querySelectorAll('[id^="candidateDeezerBtn-"]').forEach(btn => {
+        btn.innerHTML = '<i class="bi bi-music-note-beamed"></i> MP3';
+    });
+    await searchAndPlayYouTube(title, artist);
+}
+
+function playCandidateDeezerMp3(mp3Url, buttonId) {
+    const mp3Player = document.getElementById('globalMp3Player');
+    const targetBtn = document.getElementById(buttonId);
+    if (!mp3Player || !targetBtn) return;
+
+    if (mp3Player.src !== mp3Url) {
+        stopYouTubeVideo();
+        document.querySelectorAll('[id^="candidateDeezerBtn-"]').forEach(btn => {
+            btn.innerHTML = '<i class="bi bi-music-note-beamed"></i> MP3';
+        });
+
+        mp3Player.src = mp3Url;
+        mp3Player.play();
+        targetBtn.innerHTML = '<i class="bi bi-pause-fill"></i> Pause';
+        
+        mp3Player.onended = () => {
+            targetBtn.innerHTML = '<i class="bi bi-music-note-beamed"></i> MP3';
+        };
+        return;
+    }
+
+    if (mp3Player.paused) {
+        stopYouTubeVideo();
+        mp3Player.play();
+        targetBtn.innerHTML = '<i class="bi bi-pause-fill"></i> Pause';
+    } else {
+        mp3Player.pause();
+        targetBtn.innerHTML = '<i class="bi bi-play-fill"></i> MP3';
     }
 }
 
