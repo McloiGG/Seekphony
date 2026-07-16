@@ -1,0 +1,10 @@
+# Replacements template for git-filter-repo
+
+# IMPORTANT: Do NOT commit actual secret values into the repository. Save this file outside the repo,
+# fill in the exact secret string, and pass the file to the scrub script.
+
+# Example contents (this file should be created locally and never committed):
+# ACTUAL_YOUTUBE_KEY_STRING==>REDACTED_YOUTUBE_KEY
+
+# Lines follow git-filter-repo replace-text format: each line is 'OLD==>NEW'
+# Save this file (e.g., /tmp/replacements.txt) and pass it to scripts/scrub_with_git_filter_repo.sh
